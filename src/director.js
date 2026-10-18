@@ -11,11 +11,12 @@ const SENTENCE_END = /[^。！？!?♪\n]*[。！？!?♪\n]+/g;
 const now = () => Date.now();
 
 export class Director {
-  constructor({ gemini, speaker, memory, cfg }) {
+  constructor({ gemini, speaker, memory, cfg, random = Math.random }) {
     this.gemini = gemini;
     this.speaker = speaker;
     this.memory = memory;
     this.cfg = cfg;
+    this.random = random;
     this.buf = ''; // 文になりきっていない出力
     this.modelBusy = false; // Gemini が応答を生成中
     this.awaitingSince = 0; // テキスト注入後、応答待ちの開始時刻
@@ -32,12 +33,16 @@ export class Director {
     gemini.on('open', () => this.onSessionOpen());
     speaker.on('start', () => (this.lastActivity = now()));
     speaker.on('idle', () => (this.lastActivity = now()));
-    setInterval(() => this.tick(), 1000);
+    this.timer = setInterval(() => this.tick(), 1000);
+  }
+
+  dispose() {
+    clearInterval(this.timer);
   }
 
   rollIdle() {
     const { idleMinSec: a, idleMaxSec: b } = this.cfg;
-    return a + Math.random() * Math.max(0, b - a);
+    return a + this.random() * Math.max(0, b - a);
   }
 
   onUserText(t) {
@@ -97,18 +102,21 @@ export class Director {
   }
 
   inject(text) {
-    if (this.gemini.sendText(text)) {
-      this.awaitingSince = now();
-      this.lastActivity = now();
-    }
+    if (!this.gemini.sendText(text)) return false;
+    this.awaitingSince = now();
+    this.lastActivity = now();
+    return true;
   }
 
   tick() {
     if (this.paused || !this.gemini.ready || !this.quiet) return;
     if (this.chatQueue.length) {
-      const lines = this.chatQueue.splice(0, 5).map((m) => `${m.author}: ${m.text}`);
-      for (const l of lines) this.memory?.add('チャット', l);
-      this.inject(`【チャット】\n${lines.join('\n')}`);
+      const lines = this.chatQueue.slice(0, 5).map((m) => `${m.author}: ${m.text}`);
+      // 送れたときだけキューから外して記録する（送れなければ次に場が空いたときに再送）
+      if (this.inject(`【チャット】\n${lines.join('\n')}`)) {
+        this.chatQueue.splice(0, lines.length);
+        for (const l of lines) this.memory?.add('チャット', l);
+      }
       return;
     }
     if (this.cfg.idleMinSec > 0 && now() - this.lastActivity > this.nextIdleSec * 1000) {
