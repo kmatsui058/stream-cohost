@@ -25,7 +25,8 @@ const args = process.argv.slice(2);
 const argOf = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
 const config = loadConfig();
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
-const cases = JSON.parse(fs.readFileSync('eval/cases.json', 'utf8'));
+const casesFile = argOf('--cases') ?? 'eval/cases.json';
+const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'));
 const stream = JSON.parse(fs.readFileSync('eval/stream.json', 'utf8'));
 const streamSection = `\n\n# 今日の配信\nタイトル: ${stream.title}\n概要欄:\n${stream.description}`;
 
@@ -60,6 +61,9 @@ async function ask(v, text) {
   let firstMs = null;
   const liveConfig = { responseModalities: [Modality.AUDIO], systemInstruction: v.instruction, outputAudioTranscription: {} };
   if (v.thinkingLevel) liveConfig.thinkingConfig = { thinkingLevel: v.thinkingLevel };
+  if (v.tools?.length) liveConfig.tools = v.tools.map((name) => ({ [name]: {} }));
+  // ツールを使った痕跡（検索の根拠情報、ツール呼び出し、コード実行）を記録する
+  const signals = new Set();
   const done = new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('タイムアウト')), TIMEOUT_MS);
     ai.live
@@ -69,13 +73,19 @@ async function ask(v, text) {
         callbacks: {
           onmessage: (m) => {
             const sc = m.serverContent;
+            if (m.toolCall) signals.add('toolCall');
+            if (sc?.groundingMetadata) signals.add('groundingMetadata');
+            for (const part of sc?.modelTurn?.parts ?? []) {
+              if (part.executableCode) signals.add('executableCode');
+              if (part.functionCall) signals.add('functionCall');
+            }
             if (sc?.outputTranscription?.text) {
               if (firstMs == null) firstMs = Date.now() - t0;
               out += sc.outputTranscription.text;
             }
             if (sc?.turnComplete) {
               clearTimeout(timer);
-              resolve({ text: out.trim(), ms: Date.now() - t0, firstMs });
+              resolve({ text: out.trim(), ms: Date.now() - t0, firstMs, signals: [...signals] });
             }
           },
           onerror: (e) => reject(new Error(e?.message ?? 'WebSocket エラー')),
@@ -109,7 +119,7 @@ await Promise.all(
       try {
         replies[ci][vi] = await ask(v, inputOf(c));
       } catch (e) {
-        replies[ci][vi] = { text: '', ms: null, firstMs: null, error: e.message };
+        replies[ci][vi] = { text: '', ms: null, firstMs: null, signals: [], error: e.message };
         console.error(`\n失敗: ${c.id} / ${v.name}: ${e.message}`);
       }
       process.stdout.write(`\r${++finished}/${jobs.length}`);
@@ -135,19 +145,20 @@ const avgFirst = variants.map((_, vi) => {
 const avgLen = variants.map((_, vi) => replies.reduce((a, rs) => a + [...rs[vi].text].length, 0) / cases.length);
 
 let md = `# プロンプト評価 ${new Date().toLocaleString('ja-JP')}\n\n${experiment.description ?? ''}\n\n`;
-md += `- ケース: ${cases.length}（入力はテキストのみ。画面は見せていない）\n- 今日の配信: ${stream.title}\n`;
-for (const v of variants) md += `- ${v.name}: persona=${v.persona} / model=${v.model}${v.thinkingLevel ? ` / thinking=${v.thinkingLevel}` : ''}\n`;
+md += `- ケース: ${cases.length}（${casesFile}。入力はテキストのみ。画面は見せていない）\n- 今日の配信: ${stream.title}\n`;
+for (const v of variants) md += `- ${v.name}: persona=${v.persona} / model=${v.model}${v.thinkingLevel ? ` / thinking=${v.thinkingLevel}` : ''}${v.tools?.length ? ` / tools=${v.tools.join(',')}` : ''}\n`;
 md += `\n## 集計（該当した返事の数 / ${cases.length}）\n\n| 項目 | ${variants.map((v) => v.name).join(' | ')} |\n|---|${variants.map(() => '---').join('|')}|\n`;
 md += `| 平均の最初の文字までの時間 | ${avgFirst.map(sec).join(' | ')} |\n`;
 md += `| 平均の返事が終わるまでの時間 | ${avgMs.map(sec).join(' | ')} |\n`;
 md += `| 平均の文字数 | ${avgLen.map((n) => n.toFixed(0)).join(' | ')} |\n`;
+md += `| ツールを使った（検索など） | ${variants.map((_, vi) => replies.filter((rs) => rs[vi].signals.length).length).join(' | ')} |\n`;
 md += `| **正解（黙る／話す）と一致** | ${sums.map((s) => `**${s.expectMatched} / ${s.expectTotal}**`).join(' | ')} |\n`;
 for (const c of CHECKS) md += `| ${c.label} | ${sums.map((s) => s[c.key]).join(' | ')} |\n`;
 md += `\n## ケースごとの返事\n\n| ケース | 入力 | ${variants.map((v) => v.name).join(' | ')} |\n|---|---|${variants.map(() => '---').join('|')}|\n`;
 cases.forEach((c, i) => {
   const input = (c.type === 'idle' ? `（沈黙時の合図: 切り口 ${c.topic}）` : c.text) + `<br>正解: ${c.expect === 'silent' ? '黙る' : c.expect === 'speak' ? '話す' : 'どちらでも'}`;
   const mark = (ok) => (ok === null ? '' : ok ? '✓ ' : '✗ ');
-  const cells = replies[i].map((r, vi) => `${mark(checked[i][vi].expectOk)}${esc(r.text)}<br>⚑ ${flags(checked[i][vi])}（最初の文字 ${sec(r.firstMs)}）${r.error ? `<br>失敗: ${r.error}` : ''}`);
+  const cells = replies[i].map((r, vi) => `${mark(checked[i][vi].expectOk)}${esc(r.text)}<br>⚑ ${flags(checked[i][vi])}（最初の文字 ${sec(r.firstMs)}）${r.signals.length ? `<br>🔎 ${r.signals.join(', ')}` : ''}${r.error ? `<br>失敗: ${r.error}` : ''}`);
   md += `| **${c.id}**<br>${c.note} | ${esc(input)} | ${cells.join(' | ')} |\n`;
 });
 

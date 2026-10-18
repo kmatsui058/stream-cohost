@@ -27,6 +27,7 @@ export const isSilent = (text) => isSilentReply(text ?? '');
 // 正解（silent: 黙るべき / speak: 話すべき）と合っているか。正解が無ければ null
 export function matchesExpect(text, expect) {
   if (expect === undefined) return null;
+  if (!(text ?? '').trim()) return false; // 返事が無いのは、黙った（スルー）とも話したとも数えない
   return isSilent(text) === (expect === 'silent');
 }
 

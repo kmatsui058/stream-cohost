@@ -1,0 +1,8 @@
+{
+  "description": "Google 検索を使わせると、ネタの新しさと中身が良くなるか。返事までの時間はどう変わるか",
+  "variants": [
+    { "name": "A 検索なし", "persona": "file:persona.md", "model": "gemini-3.8-live" },
+    { "name": "B 検索あり", "persona": "file:persona.md", "model": "gemini-3.8-live", "tools": ["googleSearch"] },
+    { "name": "C 検索あり＋ヒント", "persona": "file:eval/personas/search-hint.md", "model": "gemini-3.8-live", "tools": ["googleSearch"] }
+  ]
+}
