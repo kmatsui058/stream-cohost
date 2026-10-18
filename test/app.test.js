@@ -212,6 +212,15 @@ describe('組み立てと操作', () => {
     });
   });
 
+  describe('live-chat / 対象の配信の決め方', () => {
+    it('起動後に OBS で配信枠を選ぶ: チャットの対象がその配信に切り替わる', async () => {
+      await build({ YOUTUBE_API_KEY: 'yk', YOUTUBE_VIDEO_ID: 'v1' });
+      const start = vi.spyOn(app.chat, 'start').mockResolvedValue();
+      app.obs.emit('broadcast', 'v2');
+      expect(start).toHaveBeenCalledWith('v2');
+    });
+  });
+
   describe('live-chat → turn-taking の配線', () => {
     it('取得したチャットは進行役に渡る', async () => {
       await build();

@@ -23,7 +23,11 @@ export class YouTubeChat extends EventEmitter {
   }
 
   async start(videoId) {
+    // 今まさに読み取っている配信と同じなら、やり直さない（OBS から同じ ID が届き続けても安全）
+    if (videoId && videoId === this.videoId && this.chatId) return;
     this.stop();
+    this.chatId = null;
+    this.videoId = videoId;
     const gen = this.gen;
     if (!this.apiKey || !videoId) {
       log.info('YOUTUBE_API_KEY / 動画 ID が無いのでチャット読み取りはオフ');

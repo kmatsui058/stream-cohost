@@ -50,6 +50,8 @@ export function createApp(config, deps = {}) {
     if (!director.paused) gemini.sendFrame(jpeg);
   });
   chat.on('messages', (msgs) => director.addChat(msgs));
+  // OBS で選んだ配信枠に、チャットの対象と配信情報を合わせる（最後に起きた指定が勝つ）
+  obs.on('broadcast', (id) => chat.start(id));
   // 配信のタイトルと概要欄をコンテキストに載せる。セッション中に変わったら張り直して反映する
   chat.on('info', (info) => {
     if (memory.setStreamInfo(info) && gemini.ready) gemini.rotate('配信の情報を反映');

@@ -6,7 +6,12 @@ export function fakeObs() {
   client.connectResults = []; // 'ok' | Error。空なら 'ok'
   client.connectCalls = 0;
   client.calls = [];
+  client.broadcastId = ''; // OBS の配信設定に入っている配信枠の動画 ID
   client.handlers = {
+    GetStreamServiceSettings: async () => ({
+      streamServiceType: 'rtmp_common',
+      streamServiceSettings: { service: 'YouTube - RTMPS', broadcast_id: client.broadcastId },
+    }),
     GetCurrentProgramScene: async () => ({ currentProgramSceneName: 'メイン' }),
     GetSourceScreenshot: async () => ({ imageData: 'data:image/jpg;base64,QUJD' }),
   };

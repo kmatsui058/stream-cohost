@@ -6,6 +6,8 @@ const cfg = { url: 'ws://127.0.0.1:4455', password: 'pw', frameIntervalMs: 2000,
 
 describe('screen-capture', () => {
   let client;
+  // 画面取り込みの呼び出しだけ（配信枠の読み取りは除く）
+  const shots = () => client.calls.filter((c) => c.method !== 'GetStreamServiceSettings');
   beforeEach(() => {
     client = fakeObs();
     vi.useFakeTimers();
@@ -25,16 +27,16 @@ describe('screen-capture', () => {
       const { frames } = started();
       await vi.advanceTimersByTimeAsync(2000);
       expect(client.lastConnect).toEqual({ url: cfg.url, password: 'pw' });
-      expect(client.calls.map((c) => c.method)).toEqual(['GetCurrentProgramScene', 'GetSourceScreenshot']);
-      expect(client.calls[1].params).toMatchObject({ sourceName: 'メイン', imageFormat: 'jpg', imageWidth: 960 });
+      expect(shots().map((c) => c.method)).toEqual(['GetCurrentProgramScene', 'GetSourceScreenshot']);
+      expect(shots()[1].params).toMatchObject({ sourceName: 'メイン', imageFormat: 'jpg', imageWidth: 960 });
       expect(frames).toEqual(['QUJD']);
     });
 
     it('対象を指定している: そのソースを取り込む', async () => {
       const { frames } = started({ ...cfg, sourceName: 'ゲーム画面' });
       await vi.advanceTimersByTimeAsync(2000);
-      expect(client.calls.map((c) => c.method)).toEqual(['GetSourceScreenshot']);
-      expect(client.calls[0].params.sourceName).toBe('ゲーム画面');
+      expect(shots().map((c) => c.method)).toEqual(['GetSourceScreenshot']);
+      expect(shots()[0].params.sourceName).toBe('ゲーム画面');
       expect(frames).toHaveLength(1);
     });
   });
@@ -46,10 +48,10 @@ describe('screen-capture', () => {
       started({ ...cfg, sourceName: 's' });
       await vi.advanceTimersByTimeAsync(2000);
       await vi.advanceTimersByTimeAsync(2000);
-      expect(client.calls).toHaveLength(1);
+      expect(shots()).toHaveLength(1);
       release({ imageData: 'data:image/jpg;base64,X' });
       await vi.advanceTimersByTimeAsync(2000);
-      expect(client.calls).toHaveLength(2);
+      expect(shots()).toHaveLength(2);
     });
   });
 
@@ -101,6 +103,57 @@ describe('screen-capture', () => {
     });
   });
 
+  describe('live-chat / OBS で選んだ配信枠を読み取る', () => {
+    const watch = () => {
+      const { cap } = started();
+      const ids = [];
+      cap.on('broadcast', (id) => ids.push(id));
+      return ids;
+    };
+
+    it('起動時に配信枠が選ばれている: その動画 ID を知らせる', async () => {
+      client.broadcastId = 'w_ObNDWnWC4';
+      const ids = watch();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ids).toEqual(['w_ObNDWnWC4']);
+    });
+
+    it('配信枠を選び直す: 15 秒以内に新しい動画 ID を 1 回だけ知らせる', async () => {
+      client.broadcastId = 'v1';
+      const ids = watch();
+      await vi.advanceTimersByTimeAsync(0);
+      client.broadcastId = 'v2';
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(ids).toEqual(['v1', 'v2']);
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(ids).toEqual(['v1', 'v2']);
+    });
+
+    it('配信枠が選ばれていない: 何も知らせない', async () => {
+      const ids = watch();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(ids).toEqual([]);
+    });
+
+    it('配信を開始する: 15 秒を待たずに読み取る', async () => {
+      const ids = watch();
+      await vi.advanceTimersByTimeAsync(0);
+      client.broadcastId = 'v3';
+      client.emit('StreamStateChanged', { outputActive: true, outputState: 'OBS_WEBSOCKET_OUTPUT_STARTED' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ids).toEqual(['v3']);
+    });
+
+    it('読み取りに失敗しても止まらず、何も知らせない', async () => {
+      client.handlers.GetStreamServiceSettings = async () => {
+        throw new Error('boom');
+      };
+      const ids = watch();
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(ids).toEqual([]);
+    });
+  });
+
   describe('取り込みの失敗で止まらない', () => {
     it('対象のソースが存在しない: 届けず、次の間隔で再試行する', async () => {
       client.handlers.GetSourceScreenshot = async () => {
@@ -109,7 +162,7 @@ describe('screen-capture', () => {
       const { frames } = started({ ...cfg, sourceName: 'なし' });
       await vi.advanceTimersByTimeAsync(4000);
       expect(frames).toHaveLength(0);
-      expect(client.calls).toHaveLength(2);
+      expect(shots()).toHaveLength(2);
     });
   });
 });
