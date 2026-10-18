@@ -4,23 +4,33 @@
 // - 接続は約 10 分で切れる仕様。切れる前（goAway）や文脈が大きくなったときに「ローテーション」する:
 //     1. memory で要約を作る
 //     2. 要約入りの systemInstruction で「新規」セッションを張る（再開ハンドルは使わない）
-//   要約に失敗したら、従来どおり再開ハンドルでつなぎ直す（文脈はサーバー側で保持）
+//   要約に失敗したら、再開ハンドルでつなぎ直す（文脈はサーバー側で保持）
 import { GoogleGenAI, Modality, MediaResolution } from '@google/genai';
 import { EventEmitter } from 'node:events';
 import { logger } from './log.js';
 
 const log = logger('gemini');
-const SUMMARY_TIMEOUT_MS = 8000;
+export const SUMMARY_TIMEOUT_MS = 8000;
+const BAD_HANDLE_WINDOW_MS = 5000;
+const MAX_RETRY_MS = 30000;
+const USAGE_INFO_INTERVAL_MS = 60000;
+export const ROTATE_COOLDOWN_MS = 60_000;
+export const ROTATE_COOLDOWN_AFTER_FAILURE_MS = 300_000;
 
-const withTimeout = (p, ms) =>
-  Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`タイムアウト ${ms}ms`)), ms))]);
+const withTimeout = (p, ms) => {
+  let t;
+  return Promise.race([
+    p,
+    new Promise((_, rej) => (t = setTimeout(() => rej(new Error(`タイムアウト ${ms}ms`)), ms))),
+  ]).finally(() => clearTimeout(t));
+};
 
 export class GeminiLive extends EventEmitter {
-  constructor(cfg, ai) {
+  constructor(cfg, ai = new GoogleGenAI({ apiKey: cfg.apiKey })) {
     super();
     this.cfg = cfg;
-    this.ai = ai ?? new GoogleGenAI({ apiKey: cfg.apiKey });
-    this.memory = null; // main.js でセットする
+    this.ai = ai;
+    this.memory = null; // app.js でセットする
     this.session = null;
     this.ready = false;
     this.handle = null; // セッション再開ハンドル（要約に失敗したときの予備）
@@ -28,11 +38,32 @@ export class GeminiLive extends EventEmitter {
     this.rotating = false;
     this.retryMs = 1000;
     this.gen = 0; // 古い接続のコールバックを無視するための世代番号
+    this.closedGen = 0; // 確立前に閉じた世代
     this.openedAt = 0;
     this.usedHandle = false;
-    this.lastUsageLog = 0;
+    this.lastUsageLog = -Infinity;
     this.promptTokens = 0;
     this.nextRotateAt = 0; // トークン起因の張り直しをこの時刻まで控える
+  }
+
+  sessionConfig(systemInstruction) {
+    return {
+      responseModalities: [Modality.AUDIO],
+      systemInstruction,
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
+      // 1 本の接続の中での上限。超えたら古いものから捨てられる（要約はされない）
+      // 映像入りだと圧縮なしでは 2 分でセッションが終わるので、これは必須
+      contextWindowCompression: {
+        triggerTokens: String(this.cfg.triggerTokens),
+        slidingWindow: { targetTokens: String(this.cfg.targetTokens) },
+      },
+      sessionResumption: this.usedHandle ? { handle: this.handle } : {},
+      mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
+      realtimeInputConfig: {
+        automaticActivityDetection: { silenceDurationMs: this.cfg.silenceDurationMs },
+      },
+    };
   }
 
   async connect({ resume = false } = {}) {
@@ -41,44 +72,41 @@ export class GeminiLive extends EventEmitter {
     this.usedHandle = resume && !!this.handle;
     const systemInstruction = this.memory ? this.memory.instruction() : this.cfg.persona;
     log.info(`接続中 model=${this.cfg.model} 方式=${this.usedHandle ? '再開ハンドル' : '新規'} 指示=${systemInstruction.length}文字`);
+    let session;
     try {
-      this.session = await this.ai.live.connect({
+      session = await this.ai.live.connect({
         model: this.cfg.model,
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction,
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          // 1 本の接続の中での上限。超えたら古いものから捨てられる（要約はされない）
-          // 映像入りだと圧縮なしでは 2 分でセッションが終わるので、これは必須
-          contextWindowCompression: {
-            triggerTokens: String(this.cfg.triggerTokens),
-            slidingWindow: { targetTokens: String(this.cfg.targetTokens) },
-          },
-          sessionResumption: this.usedHandle ? { handle: this.handle } : {},
-          mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
-          realtimeInputConfig: {
-            automaticActivityDetection: { silenceDurationMs: this.cfg.silenceDurationMs },
-          },
-        },
+        config: this.sessionConfig(systemInstruction),
         callbacks: {
-          onopen: () => {
-            if (gen !== this.gen) return;
-            this.ready = true;
-            this.openedAt = Date.now();
-            this.promptTokens = 0;
-            log.info('接続完了');
-            this.emit('open');
-          },
           onmessage: (m) => gen === this.gen && this.onMessage(m),
-          onerror: (e) => gen === this.gen && log.error('WebSocket エラー', e.message ?? String(e)),
+          onerror: (e) => gen === this.gen && log.error('WebSocket エラー', e?.message ?? String(e)),
           onclose: (e) => gen === this.gen && this.onClose(e),
         },
       });
     } catch (e) {
+      if (gen !== this.gen || this.closing) return;
       log.error('接続失敗', e.message);
-      this.scheduleReconnect();
+      this.scheduleReconnect({ resume });
+      return;
     }
+    // 待っている間に別の接続が始まった／終了した場合は、この接続を捨てる
+    if (gen !== this.gen || this.closing) {
+      try { session.close(); } catch {}
+      return;
+    }
+    if (this.closedGen === gen) return; // 確立直後に切れた（onClose が再接続を予約済み）
+    // セッションを受け取ってから送信可能にする（onopen の時点ではまだ session が無い）
+    const prev = this.session;
+    this.session = session;
+    if (prev && prev !== session) {
+      try { prev.close(); } catch {} // 旧世代なので onclose は無視される
+    }
+    this.ready = true;
+    this.openedAt = Date.now();
+    this.retryMs = 1000;
+    this.promptTokens = 0;
+    log.info('接続完了');
+    this.emit('open');
   }
 
   onMessage(m) {
@@ -104,8 +132,7 @@ export class GeminiLive extends EventEmitter {
     this.promptTokens = u.promptTokenCount ?? this.promptTokens;
     const detail = (u.promptTokensDetails ?? []).map((d) => `${d.modality}=${d.tokenCount}`).join(' ');
     log.debug(`usage prompt=${u.promptTokenCount} response=${u.responseTokenCount} ${detail}`);
-    // info には 1 分に 1 回だけ出す
-    if (Date.now() - this.lastUsageLog > 60000) {
+    if (Date.now() - this.lastUsageLog >= USAGE_INFO_INTERVAL_MS) {
       this.lastUsageLog = Date.now();
       log.info(`コンテキスト ${u.promptTokenCount} tokens (${detail})`);
     }
@@ -113,20 +140,24 @@ export class GeminiLive extends EventEmitter {
   }
 
   onClose(e) {
+    const wasReady = this.ready;
     this.ready = false;
+    this.closedGen = this.gen;
     log.warn(`切断 code=${e?.code} reason=${e?.reason || '(なし)'}`);
     if (this.closing) return;
     // 再開ハンドルでつないで 5 秒以内に落ちたなら、ハンドルが悪いとみなして次は新規で張る
-    const resume = !(this.usedHandle && Date.now() - this.openedAt < 5000) && !!this.handle;
-    if (!resume) this.handle = null;
-    this.scheduleReconnect({ resume });
+    const badHandle = this.usedHandle && (!wasReady || Date.now() - this.openedAt < BAD_HANDLE_WINDOW_MS);
+    if (badHandle) this.handle = null;
+    this.scheduleReconnect({ resume: !!this.handle });
   }
 
   scheduleReconnect(opts) {
     const ms = this.retryMs;
-    this.retryMs = Math.min(this.retryMs * 2, 30000);
+    this.retryMs = Math.min(this.retryMs * 2, MAX_RETRY_MS);
     log.info(`${ms / 1000} 秒後に再接続`);
-    setTimeout(() => this.connect(opts), ms);
+    const gen = this.gen;
+    // 待っている間に張り直し等で別の接続が始まっていたら、この予約は捨てる
+    setTimeout(() => !this.closing && gen === this.gen && this.connect(opts), ms);
   }
 
   // 要約してから新規セッションに乗り換える。要約できなければ再開ハンドルで乗り換える
@@ -138,17 +169,18 @@ export class GeminiLive extends EventEmitter {
     try {
       if (!this.memory) throw new Error('memory 未設定');
       await withTimeout(this.memory.summarize(), SUMMARY_TIMEOUT_MS);
-      this.nextRotateAt = Date.now() + 60_000;
+      this.nextRotateAt = Date.now() + ROTATE_COOLDOWN_MS;
     } catch (e) {
       log.warn(`要約に失敗したので再開ハンドルで続行: ${e.message}`);
       resume = !!this.handle;
-      // 要約 API が落ちているときに張り直しを連発しないよう、トークン起因の張り直しを 5 分止める
-      this.nextRotateAt = Date.now() + 300_000;
+      // 要約 API が落ちているときに張り直しを連発しないよう、トークン起因の張り直しを止める
+      this.nextRotateAt = Date.now() + ROTATE_COOLDOWN_AFTER_FAILURE_MS;
     }
-    const old = this.session;
-    await this.connect({ resume }); // gen が進むので旧接続の onclose は無視される
-    try { old?.close(); } catch {}
-    this.rotating = false;
+    try {
+      await this.connect({ resume }); // 成功すれば旧セッションは connect 内で閉じられる
+    } finally {
+      this.rotating = false;
+    }
   }
 
   send(params) {
@@ -177,6 +209,7 @@ export class GeminiLive extends EventEmitter {
 
   close() {
     this.closing = true;
-    this.session?.close();
+    this.ready = false;
+    try { this.session?.close(); } catch {}
   }
 }
