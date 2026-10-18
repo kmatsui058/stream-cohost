@@ -1,10 +1,19 @@
 // 配信に重ねる画面のロジック。ブラウザ（OBS のブラウザソース）で動き、テストでは偽物を渡して動かす。
 //
 // サーバーから {type:'say', id, text, wav(base64)} を受けたら再生し、終わったら {type:'ended', id} を返す。
-// {type:'stop'} で再生中の音声を止める。口パクは再生音量（RMS）がしきい値を超えたら「開」にするだけの簡易方式。
+// {type:'stop'} で再生中の音声を止める。{type:'profile', name, character} で表示名と立ち絵の有無を受け取る。
+// 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
-export const IMAGES = { closed: '/char/closed.png', open: '/char/open.png' };
-export const MOUTH_THRESHOLD = 0.04;
+export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
+export const LEVEL_FULL = 0.15; // この RMS 以上で明るさ 100%
+export const ATTACK = 0.5; // 明るくなるときの追従の速さ（1 フレームあたり）
+export const RELEASE = 0.08; // 暗くなるときの追従の速さ（ゆっくり戻す）
+// 表情の切り替えのしきい値（明るさの幅 DIM〜1 に対する割合）。入る明るさと戻る明るさを変えて、
+// 音量の細かな揺れで行き来しないようにする
+export const SPEAK_ON_FRAC = 0.25;
+export const SPEAK_OFF_FRAC = 0.1;
+const SPEAK_ON = DIM + (1 - DIM) * SPEAK_ON_FRAC;
+const SPEAK_OFF = DIM + (1 - DIM) * SPEAK_OFF_FRAC;
 export const RECONNECT_MS = 2000;
 
 export function rms(samples) {
@@ -24,7 +33,7 @@ function base64ToArrayBuffer(b64) {
  * @param {object} deps
  * @param {AudioContext} deps.audioContext
  * @param {() => WebSocket} deps.connect  サーバーへの WebSocket を開く関数
- * @param {{char: HTMLImageElement, placeholder: HTMLElement, sub: HTMLElement, status: HTMLElement}} deps.elements
+ * @param {{root: HTMLElement, name: HTMLElement, sub: HTMLElement, status: HTMLElement}} deps.elements
  * @param {(fn: Function, ms: number) => unknown} [deps.schedule]  再接続の予約（既定 setTimeout）
  */
 export function createOverlayClient({ audioContext: ctx, connect: openSocket, elements: el, schedule = setTimeout }) {
@@ -32,17 +41,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
   analyser.fftSize = 512;
   analyser.connect(ctx.destination);
   const samples = new Float32Array(analyser.fftSize);
-  let usePlaceholder = false;
+  let brightness = DIM;
+  let speaking = false;
   let current = null; // { id, src }
   let ws = null;
-
-  // 立ち絵が読み込めなければ仮の図形に切り替える
-  el.char.onerror = () => {
-    usePlaceholder = true;
-    el.char.style.display = 'none';
-    el.placeholder.style.display = 'block';
-  };
-  el.char.src = IMAGES.closed;
 
   function send(msg) {
     try {
@@ -52,21 +54,18 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
     }
   }
 
-  function setMouth(open) {
-    if (usePlaceholder) el.placeholder.style.setProperty('--mouth', open ? '40px' : '6px');
-    else {
-      const want = open ? IMAGES.open : IMAGES.closed;
-      if (!el.char.src.endsWith(want)) el.char.src = want;
-    }
-    el.char.classList.toggle('talk', open);
-  }
-
-  // 毎フレーム呼ぶ（requestAnimationFrame から）
-  function lipStep() {
+  // 毎フレーム呼ぶ（requestAnimationFrame から）。再生音量を明るさに変換して滑らかに追従させる
+  function levelStep() {
+    let target = DIM;
     if (current) {
       analyser.getFloatTimeDomainData(samples);
-      setMouth(rms(samples) > MOUTH_THRESHOLD);
-    } else setMouth(false);
+      target = DIM + (1 - DIM) * Math.min(1, rms(samples) / LEVEL_FULL);
+    }
+    brightness += (target - brightness) * (target > brightness ? ATTACK : RELEASE);
+    if (!speaking && brightness > SPEAK_ON) speaking = true;
+    else if (speaking && brightness < SPEAK_OFF) speaking = false;
+    el.root.style.setProperty('--brightness', brightness.toFixed(3));
+    el.root.classList.toggle('speaking', speaking);
   }
 
   function stopCurrent() {
@@ -115,6 +114,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       }
       if (m.type === 'say') return say(m);
       if (m.type === 'stop') stopCurrent();
+      if (m.type === 'profile') {
+        el.name.textContent = m.name ?? '';
+        el.root.classList.toggle('has-character', !!m.character);
+      }
     };
     // サーバー未起動・再起動時は赤字で表示して再接続（配信に映るのが嫌なら #status を消してよい）
     ws.onclose = () => {
@@ -124,5 +127,6 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
     };
   }
 
-  return { start, lipStep, say, get current() { return current; } };
+  levelStep(); // 起動直後から暗い状態にする
+  return { start, levelStep, say, get current() { return current; } };
 }

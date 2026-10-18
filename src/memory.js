@@ -9,15 +9,22 @@ import path from 'node:path';
 import { logger } from './log.js';
 
 const log = logger('memory');
+const FINALIZE_TIMEOUT_MS = 8000;
 
 export class Memory {
-  constructor({ ai, model, maxChars, recentEntries, persona, summaryFile = path.resolve('logs', 'summary.txt') }) {
+  constructor({
+    ai, model, maxChars, recentEntries, persona,
+    summaryFile = path.resolve('logs', 'summary.txt'),
+    stateFile = path.resolve('logs', 'carryover.json'), // 配信をまたいで引き継ぐ記憶
+  }) {
     this.ai = ai;
     this.model = model;
     this.maxChars = maxChars;
     this.recentEntries = recentEntries;
     this.persona = persona;
     this.summaryFile = summaryFile;
+    this.stateFile = stateFile;
+    this.previous = ''; // 前回の配信から引き継いだ記憶（指示に入れるだけで、今回の要約には混ぜない）
     this.summary = '';
     this.entries = []; // { role: '配信者' | '相方' | 'チャット', text, sealed? }
     this.summarizing = null;
@@ -71,6 +78,7 @@ ${this.format(old)}`;
         fs.mkdirSync(path.dirname(this.summaryFile), { recursive: true });
         fs.writeFileSync(this.summaryFile, `# ${new Date().toLocaleString('ja-JP')}\n\n${text}\n`);
         log.info(`要約を更新 (${old.length} 件 → ${text.length} 文字, ${Date.now() - t0}ms)\n${text}`);
+        this.save();
       } catch (e) {
         for (const o of old) delete o.sealed;
         throw e;
@@ -79,10 +87,59 @@ ${this.format(old)}`;
     return this.summarizing;
   }
 
+  // 今の要約と直近の発言を、次の起動で引き継げるように保存する
+  save() {
+    const state = {
+      savedAt: new Date().toISOString(),
+      summary: this.summary,
+      recent: this.entries.map(({ role, text }) => ({ role, text })),
+    };
+    try {
+      fs.mkdirSync(path.dirname(this.stateFile), { recursive: true });
+      fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2));
+    } catch (e) {
+      log.warn('記憶を保存できません', e.message);
+    }
+  }
+
+  // 終了時: 要約の更新を試みてから保存する。失敗しても時間切れでも、その時点の内容は保存する
+  async finalize() {
+    if (!this.summary && !this.entries.length) return;
+    let timer;
+    try {
+      await Promise.race([
+        this.summarize(),
+        new Promise((_, rej) => (timer = setTimeout(() => rej(new Error('タイムアウト')), FINALIZE_TIMEOUT_MS))),
+      ]);
+    } catch (e) {
+      log.warn(`終了時の要約に失敗したので、その時点の内容を保存します: ${e.message}`);
+    } finally {
+      clearTimeout(timer);
+    }
+    this.save();
+    log.info(`記憶を保存しました: ${this.stateFile}`);
+  }
+
+  // 起動時: 前回保存した記憶を読み込む。読めたら true
+  loadPrevious() {
+    if (!fs.existsSync(this.stateFile)) return false;
+    try {
+      const s = JSON.parse(fs.readFileSync(this.stateFile, 'utf8'));
+      const recent = (s.recent ?? []).map((e) => `${e.role}: ${e.text}`).join('\n');
+      this.previous = [s.summary, recent && `直前のやり取り:\n${recent}`].filter(Boolean).join('\n\n');
+      log.info(`前回の記憶を引き継ぎます（${s.savedAt ? new Date(s.savedAt).toLocaleString('ja-JP') : '日時不明'} に保存）`);
+      return !!this.previous;
+    } catch (e) {
+      log.warn(`前回の記憶を読み込めません。引き継がずに起動します: ${e.message}`);
+      return false;
+    }
+  }
+
   // 新しいセッションに渡すシステムプロンプト
   instruction() {
-    if (!this.summary && !this.entries.length) return this.persona;
-    return `${this.persona}
+    const prev = this.previous ? `\n\n# 前回の配信の要約\n${this.previous}` : '';
+    if (!this.summary && !this.entries.length) return this.persona + prev;
+    return `${this.persona}${prev}
 
 # これまでの配信の流れ（要約）
 ${this.summary || '（まだなし）'}

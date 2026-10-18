@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Director } from '../src/director.js';
+import { Director, IDLE_TOPICS, IDLE_CLOSING } from '../src/director.js';
 import { logFilePath } from '../src/log.js';
 
 const cfg = { idleMinSec: 25, idleMaxSec: 45, bargeIn: true };
@@ -178,6 +178,39 @@ describe('turn-taking', () => {
       gemini.ready = false;
       vi.advanceTimersByTime(120_000);
       expect(gemini.sendText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('話しかける合図は話題を広げる内容にする', () => {
+    const idleTexts = (n, random) => {
+      director = new Director({ gemini, speaker, memory, cfg, random });
+      for (let i = 0; i < n; i++) vi.advanceTimersByTime(46_000);
+      return gemini.sendText.mock.calls.map((c) => c[0]);
+    };
+    const kindOf = (text) => IDLE_TOPICS.findIndex((t) => text.includes(t));
+
+    it('合図の内容: 話題の切り口と、具体的な質問か提案で締める指示が入っている', () => {
+      const [text] = idleTexts(1, () => 0.5);
+      expect(text).toMatch(/^【合図】/);
+      expect(kindOf(text)).toBeGreaterThanOrEqual(0);
+      expect(text).toContain(IDLE_CLOSING);
+      expect(IDLE_CLOSING).toMatch(/具体的な質問か、自分の意見/);
+      expect(IDLE_CLOSING).toMatch(/手伝いや段取りの申し出はせず/);
+      expect(IDLE_CLOSING).toMatch(/くり返さない/);
+      expect(IDLE_TOPICS.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it.each([
+      ['常に 0', () => 0],
+      ['常に 0.99', () => 0.99],
+      ['ばらばら', (() => { let s = 7; return () => ((s = (s * 9301 + 49297) % 233280) / 233280); })()],
+    ])('合図が続く（乱数が%s）: 隣り合う 2 回が同じ種類にならず、2 種類以上を使う', (_, random) => {
+      const all = idleTexts(10, random).map(kindOf);
+      expect(all.length).toBeGreaterThanOrEqual(10); // 沈黙の秒数は乱数で 25〜45 秒なので、10 回以上出る
+      const kinds = all.slice(0, 10);
+      expect(kinds.every((k) => k >= 0)).toBe(true);
+      for (let i = 1; i < kinds.length; i++) expect(kinds[i]).not.toBe(kinds[i - 1]);
+      expect(new Set(kinds).size).toBeGreaterThanOrEqual(2);
     });
   });
 

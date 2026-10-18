@@ -59,7 +59,7 @@ function classList() {
 export function fakeElements() {
   const el = () => {
     const props = {};
-    return { textContent: '', src: '', classList: classList(), style: { display: '', setProperty: (k, v) => (props[k] = v), props } };
+    return { textContent: '', classList: classList(), style: { setProperty: (k, v) => (props[k] = v), props } };
   };
-  return { char: el(), placeholder: el(), sub: el(), status: el() };
+  return { root: el(), name: el(), sub: el(), status: el() };
 }
