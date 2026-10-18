@@ -194,9 +194,8 @@ describe('turn-taking', () => {
       expect(text).toMatch(/^【合図】/);
       expect(kindOf(text)).toBeGreaterThanOrEqual(0);
       expect(text).toContain(IDLE_CLOSING);
-      expect(IDLE_CLOSING).toMatch(/具体的な質問か、自分の意見/);
-      expect(IDLE_CLOSING).toMatch(/手伝いや段取りの申し出はせず/);
-      expect(IDLE_CLOSING).toMatch(/くり返さない/);
+      expect(IDLE_CLOSING).toMatch(/観察したこと、そこから立てた仮説、理解するための具体的な問い/);
+      expect(IDLE_CLOSING).toMatch(/直前の発言とは違う角度/);
       expect(IDLE_TOPICS.length).toBeGreaterThanOrEqual(5);
     });
 
