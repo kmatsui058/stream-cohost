@@ -41,7 +41,7 @@
 | memory | AI クライアント（既存）、要約ファイルのパス |
 | speaker | 合成関数（既定は `voicevox.synthesize`） |
 | voicevox / youtube | `fetch`（既定はグローバルの `fetch`） |
-| director | gemini、speaker、memory（既存）、現在時刻を返す関数 |
+| director | gemini、speaker、memory（既存）、乱数（沈黙の秒数を決める）。時刻とタイマーは Vitest のフェイクタイマーで制御する |
 
 - 代替案はモジュールモック（`vi.mock`）。import の順序や巻き上げに依存して壊れやすく、本番コードの依存関係も見えにくくなるので採らない。
 

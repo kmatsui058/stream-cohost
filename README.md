@@ -1,5 +1,7 @@
 # stream-cohost — 配信用 AI 相方
 
+[![CI](https://github.com/kmatsui058/stream-cohost/actions/workflows/ci.yml/badge.svg)](https://github.com/kmatsui058/stream-cohost/actions/workflows/ci.yml)
+
 配信者のマイク音声と OBS の配信画面を Gemini Live API にリアルタイムで送り、返ってきた発言を VOICEVOX で読み上げ、OBS のブラウザソースで立ち絵（口パク）と字幕を出す。YouTube のライブチャットも読む。
 
 ---
@@ -48,20 +50,25 @@
 
 | ファイル | 役割 | 落ちたときの症状 |
 |---|---|---|
-| [src/main.js](src/main.js) | 起動と配線、コンソール操作 | 全停止 |
+| [src/main.js](src/main.js) | エントリポイント。必須設定（`GEMINI_API_KEY`・`MIC_DEVICE`）を確認して起動し、コンソール入力と Ctrl+C をつなぐ | 全停止 |
+| [src/app.js](src/app.js) | 部品の生成と配線、コンソール操作の処理、コンテキストが大きくなったときの張り直し判定 | 全停止 |
 | [src/config.js](src/config.js) | `.env` を読んで既定値を補う。**設定項目はここが正** | — |
 | [src/mic.js](src/mic.js) | ffmpeg を起動し、100ms ごとの PCM チャンクを発行。ffmpeg が落ちたら 3 秒後に再起動 | 話しかけても反応しない |
 | [src/obs.js](src/obs.js) | OBS に接続し、`FRAME_INTERVAL_MS` ごとにスクショ。切断されたら 5 秒ごとに再接続 | 画面に言及しなくなる |
 | [src/gemini.js](src/gemini.js) | Live セッションの管理。音声・画像・テキストを送り、文字起こしやイベントを受ける。**自動でつなぎ直す**（後述） | 何も喋らない |
+| [src/memory.js](src/memory.js) | 会話の記録と要約。張り直すときに「要約 + 直近の発言」を新しいセッションへ渡す | 張り直し後に話の流れを忘れる |
 | [src/director.js](src/director.js) | 進行役。文への区切り、割り込み時の停止、沈黙時の自発発話、チャットの注入タイミング | 喋るタイミングがおかしい |
 | [src/speaker.js](src/speaker.js) | 発話キュー。VOICEVOX で合成してオーバーレイへ送り、再生完了を待って次へ | 文字起こしはログに出るのに音が出ない |
 | [src/voicevox.js](src/voicevox.js) | VOICEVOX ENGINE の `audio_query` → `synthesis` | 同上（「合成失敗」がログに出る） |
 | [src/overlay.js](src/overlay.js) | `:8787` で HTML 配信と WebSocket | 音も立ち絵も出ない |
-| [public/overlay.html](public/overlay.html) | ブラウザソース本体。再生・口パク・字幕 | 同上 |
+| [public/overlay.html](public/overlay.html) | ブラウザソース本体。ブラウザの部品を渡して overlay-core.js を起動するだけ | 同上 |
+| [public/overlay-core.js](public/overlay-core.js) | 画面側のロジック。再生・口パク・字幕・再生完了の通知・再接続 | 同上 |
 | [src/youtube.js](src/youtube.js) | ライブチャットのポーリング | チャットに反応しない（それ以外は動く） |
 | [persona.md](persona.md) | 相方のキャラ・話し方・禁止事項（システムプロンプト）。**ここを編集すれば性格が変わる**（再起動が必要） | — |
-| [scripts/test-voice.js](scripts/test-voice.js) | API キーなしで「合成 → オーバーレイ」だけ試すスクリプト | — |
 | `logs/YYYY-MM-DD.log` | 全ログ。コンソールと同じ内容 + `LOG_DEBUG=1` で詳細 | — |
+| `logs/summary.txt` | 相方が今覚えている要約（張り直すたびに上書き） | — |
+| [openspec/](openspec/) | 振る舞いの仕様（能力ごと）。何をするべきかの正はここ | — |
+| [test/](test/) | 自動テスト。仕様のシナリオごとにテストがある | — |
 
 ---
 
@@ -82,9 +89,13 @@
 
 ### Gemini セッションの寿命（重要）
 
-- Live API の **1 本の接続は約 10 分で切れる**。切れる前にサーバーから `goAway` が届くので、即座に新しい接続を張り直す。
-- 張り直すときは `sessionResumption` のハンドルを渡して、**会話の文脈を引き継ぐ**（ハンドルの有効期限は 2 時間）。
-- 映像入りのセッションは、コンテキスト圧縮（`slidingWindow`）を有効にしないと 2 分で終わる。有効にしてあるので長時間でも続くが、**古い会話は徐々に忘れる**。
+- Live API の **1 本の接続は約 10 分で切れる**。切れる前にサーバーから `goAway` が届くので、そこで「ローテーション」する。
+  1. 会話の書き起こしのうち、直近 12 件（`RECENT_ENTRIES`）より古い部分を、別モデル（`gemini-3.5-flash-lite`）で要約する（1,500 字以内）。
+  2. 「persona.md + 要約 + 直近の発言」を指示にした**新規セッション**を張る。
+  3. 要約に失敗したり 8 秒以内に終わらなかったりしたら、`sessionResumption` の再開ハンドルで張り直す（サーバー側の文脈をそのまま引き継ぐ）。
+- 1 本の接続の中でも、コンテキストには上限がある（32,000 トークンを超えたら 16,000 まで古い順に捨てる）。映像入りのセッションはこの圧縮が無いと 2 分で終わるので必須。
+- コンテキストが 24,000 トークン（`ROTATE_AT_TOKENS`）を超えたら、場が空いたタイミングでもローテーションする。直後 60 秒（要約に失敗したら 5 分）は再実行しない。
+- 相方が今何を覚えているかは `logs/summary.txt`、またはコンソールで `m` を入力すると見られる。
 - 予期しない切断のときは 1→2→4…最大 30 秒の間隔で再接続する。ログには `[gemini] 切断 code=... reason=...` が出る。
 
 ---
@@ -123,9 +134,10 @@
 
 ```powershell
 cd ~\stream-cohost
-npm run test:voice   # 任意：API なしで、声とオーバーレイだけ確認
 npm start
 ```
+
+起動するとコンソールに操作の一覧が出る。OBS のブラウザソースの左上に赤字で `cohost: 未接続` が出ていなければ、画面とつながっている。
 
 ---
 
@@ -174,3 +186,32 @@ npm start
 - **会話は 1 本の連続したセッション**：配信者が喋るたびに Gemini は必ず何かしら返答しようとする。相づちだけで済ませる、黙るといった判断は persona.md の指示頼み。
 - **相方の声は Gemini に届かない**（届くべきでもない）。Gemini は自分が生成した文として覚えているので、文脈は保たれる。ただし割り込みで途中までしか読まれなかった場合も、Gemini は最後まで言ったつもりでいる。
 - **映像の解像度**：`MEDIA_RESOLUTION_LOW` + 幅 960px なので、小さい文字は読めないことがある。上げるとトークン（料金）が増える。
+
+---
+
+## 8. 開発
+
+### テスト
+
+```powershell
+npm test                # 全テスト
+npm run test:watch      # 変更を監視して再実行
+npm run test:coverage   # カバレッジつき（行・分岐とも 80% 未満なら失敗）
+```
+
+- 外部サービス（Gemini、OBS、VOICEVOX、YouTube、ffmpeg）は偽物に差し替えて動かすので、ネットワークも API キーも要らない。偽物は [test/fakes/](test/fakes/) にある。
+- テスト名は「能力 / 要件 / シナリオ」の形で、[openspec/](openspec/) の仕様と対応している。
+- 実機・実 API での確認は、手動スモークテスト（`docs/smoke-test.md`）で行う。
+
+### 仕様（OpenSpec）
+
+```powershell
+npx openspec list                              # 進行中の変更
+npx openspec show baseline-stream-cohost       # 変更の中身
+npx openspec validate --all --strict           # 仕様の形式チェック（CI でも実行）
+```
+
+### CI とブランチ運用
+
+- GitHub Actions（[.github/workflows/ci.yml](.github/workflows/ci.yml)）で、Windows と Ubuntu の両方について `openspec validate` とテスト（カバレッジ閾値つき）を回す。
+- main に直接コミットしない。作業ごとにブランチを切って PR を出し、CI が通ってからマージする。
