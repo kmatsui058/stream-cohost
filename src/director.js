@@ -11,12 +11,15 @@ const SENTENCE_END = /[^。！？!?♪\n]*[。！？!?♪\n]+/g;
 const now = () => Date.now();
 
 export class Director {
-  constructor({ gemini, speaker, memory, cfg, random = Math.random }) {
+  constructor({ gemini, speaker, memory, cfg, random = Math.random, isAudible = () => true }) {
     this.gemini = gemini;
     this.speaker = speaker;
     this.memory = memory;
     this.cfg = cfg;
     this.random = random;
+    // 相方の声が誰かに届く状態か（= 配信に重ねる画面がつながっているか）
+    this.isAudible = isAudible;
+    this.holding = false; // 画面が未接続のため自発発話を控えている
     this.buf = ''; // 文になりきっていない出力
     this.modelBusy = false; // Gemini が応答を生成中
     this.awaitingSince = 0; // テキスト注入後、応答待ちの開始時刻
@@ -108,8 +111,24 @@ export class Director {
     return true;
   }
 
+  // 誰かが話したのと同じ扱いにして、沈黙の数え直しを始める（画面がつながったときなど）
+  markActivity() {
+    this.lastActivity = now();
+  }
+
   tick() {
-    if (this.paused || !this.gemini.ready || !this.quiet) return;
+    if (this.paused || !this.gemini.ready) return;
+    // 画面が未接続なら、誰にも聞こえない発言をしないよう、合図とチャットの受け渡しを控える
+    if (!this.isAudible()) {
+      if (!this.holding) log.info('画面が未接続のため、自分から話しかけるのを控えます');
+      this.holding = true;
+      return;
+    }
+    if (this.holding) {
+      this.holding = false;
+      log.info('画面がつながったので、自分から話しかけるのを再開します');
+    }
+    if (!this.quiet) return;
     if (this.chatQueue.length) {
       const lines = this.chatQueue.slice(0, 5).map((m) => `${m.author}: ${m.text}`);
       // 送れたときだけキューから外して記録する（送れなければ次に場が空いたときに再送）

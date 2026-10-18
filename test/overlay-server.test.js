@@ -107,6 +107,14 @@ describe('stream-overlay（サーバー側）', () => {
       for (const s of sockets) expect(s.received).toEqual([{ type: 'say', id: 1, text: 'やあ', wav: 'AA==' }, { type: 'stop' }]);
     });
 
+    it('画面が新しく接続するたびに connect を 1 回出す', async () => {
+      const port = await start();
+      let n = 0;
+      overlay.on('connect', () => n++);
+      sockets.push(await open(port), await open(port));
+      await until(() => n === 2);
+    });
+
     it('切断した画面は数えない', async () => {
       const port = await start();
       const ws = await open(port);

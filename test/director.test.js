@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Director } from '../src/director.js';
+import { logFilePath } from '../src/log.js';
 
 const cfg = { idleMinSec: 25, idleMaxSec: 45, bargeIn: true };
 
@@ -230,6 +232,65 @@ describe('turn-taking', () => {
       gemini.emit('open');
       expect(pushed()).toEqual(['途中まで']);
       expect(director.quiet).toBe(true);
+    });
+  });
+
+  describe('画面が未接続のときは自分から話しかけない', () => {
+    let audible;
+    const makeQuiet = () => {
+      audible = false;
+      director = new Director({ gemini, speaker, memory, cfg, random: () => 0.5, isAudible: () => audible });
+    };
+
+    it('画面をつなぐ前に長い沈黙が続く: 合図を送らない', () => {
+      makeQuiet();
+      vi.advanceTimersByTime(120_000);
+      expect(gemini.sendText).not.toHaveBeenCalled();
+    });
+
+    it('画面をつなぐ前にチャットが届く: つながる前は渡さず、つながった後に渡す', () => {
+      makeQuiet();
+      director.addChat([{ author: 'a', text: 'b' }]);
+      vi.advanceTimersByTime(10_000);
+      expect(gemini.sendText).not.toHaveBeenCalled();
+      audible = true;
+      vi.advanceTimersByTime(1000);
+      expect(gemini.sendText).toHaveBeenCalledWith('【チャット】\na: b');
+    });
+
+    it('画面をつなぐ前に配信者が話しかける: AI の発言はこれまでどおり読み上げに回す', () => {
+      makeQuiet();
+      gemini.emit('modelText', 'はい。');
+      expect(pushed()).toEqual(['はい。']);
+    });
+  });
+
+  describe('画面がつながった時点から沈黙を数える', () => {
+    it('長い待ちの後に画面をつなぐ: つながった時点から沈黙の秒数が経つまで合図を送らない', () => {
+      let audible = false;
+      director = new Director({ gemini, speaker, memory, cfg, random: () => 0.5, isAudible: () => audible }); // 35 秒
+      vi.advanceTimersByTime(300_000);
+      audible = true;
+      director.markActivity();
+      vi.advanceTimersByTime(35_000);
+      expect(gemini.sendText).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(gemini.sendText).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('自発発話を控えていることを記録する', () => {
+    it('未接続のまま時間が経つ: 控えるログと再開のログを 1 回ずつ記録する', async () => {
+      let audible = false;
+      director = new Director({ gemini, speaker, memory, cfg, isAudible: () => audible });
+      vi.advanceTimersByTime(60_000);
+      audible = true;
+      vi.advanceTimersByTime(5000);
+      vi.useRealTimers();
+      await new Promise((r) => setTimeout(r, 50));
+      const text = fs.readFileSync(logFilePath(), 'utf8');
+      expect(text.match(/画面が未接続のため、自分から話しかけるのを控えます/g)).toHaveLength(1);
+      expect(text.match(/画面がつながったので、自分から話しかけるのを再開します/g)).toHaveLength(1);
     });
   });
 
