@@ -9,25 +9,26 @@ import path from 'node:path';
 import { logger } from './log.js';
 
 const log = logger('memory');
-const SUMMARY_FILE = path.resolve('logs', 'summary.txt');
 
 export class Memory {
-  constructor({ ai, model, maxChars, recentEntries, persona }) {
+  constructor({ ai, model, maxChars, recentEntries, persona, summaryFile = path.resolve('logs', 'summary.txt') }) {
     this.ai = ai;
     this.model = model;
     this.maxChars = maxChars;
     this.recentEntries = recentEntries;
     this.persona = persona;
+    this.summaryFile = summaryFile;
     this.summary = '';
-    this.entries = []; // { role: '配信者' | '相方' | 'チャット', text }
+    this.entries = []; // { role: '配信者' | '相方' | 'チャット', text, sealed? }
     this.summarizing = null;
   }
 
-  // 文字起こしは細切れで届くので、同じ話者が続く間は 1 件にまとめる
+  // 文字起こしは細切れで届くので、同じ話者が続く間は 1 件にまとめる。
+  // ただし要約の対象になった発言（sealed）には結合しない（要約後に一緒に消えてしまうため）
   add(role, text) {
     if (!text) return;
     const last = this.entries.at(-1);
-    if (last && last.role === role && role !== 'チャット') last.text += text;
+    if (last && last.role === role && role !== 'チャット' && !last.sealed) last.text += text;
     else this.entries.push({ role, text });
   }
 
@@ -35,14 +36,8 @@ export class Memory {
     return entries.map((e) => `${e.role}: ${e.text.trim()}`).join('\n');
   }
 
-  // 直近ぶんを残して、それより前を要約に畳み込む
-  async summarize() {
-    if (this.summarizing) return this.summarizing;
-    const old = this.entries.slice(0, Math.max(0, this.entries.length - this.recentEntries));
-    if (!old.length) return;
-    this.summarizing = (async () => {
-      const t0 = Date.now();
-      const prompt = `あなたはライブ配信の記録係です。「これまでの要約」と「新しい書き起こし」をもとに、要約を更新してください。
+  buildPrompt(old) {
+    return `あなたはライブ配信の記録係です。「これまでの要約」と「新しい書き起こし」をもとに、要約を更新してください。
 
 # ルール
 - 日本語で ${this.maxChars} 文字以内。箇条書きでよい
@@ -56,13 +51,30 @@ ${this.summary || '（なし。配信開始直後）'}
 
 # 新しい書き起こし
 ${this.format(old)}`;
-      const res = await this.ai.models.generateContent({ model: this.model, contents: prompt });
-      const text = res.text?.trim();
-      if (!text) throw new Error('要約が空でした');
-      this.summary = text;
-      this.entries.splice(0, old.length);
-      fs.writeFileSync(SUMMARY_FILE, `# ${new Date().toLocaleString('ja-JP')}\n\n${text}\n`);
-      log.info(`要約を更新 (${old.length} 件 → ${text.length} 文字, ${Date.now() - t0}ms)\n${text}`);
+  }
+
+  // 直近ぶんを残して、それより前を要約に畳み込む。実行中に呼ばれたら同じ処理の完了を待つ
+  summarize() {
+    if (this.summarizing) return this.summarizing;
+    const old = this.entries.slice(0, Math.max(0, this.entries.length - this.recentEntries));
+    if (!old.length) return Promise.resolve();
+    for (const e of old) e.sealed = true;
+    this.summarizing = (async () => {
+      const t0 = Date.now();
+      try {
+        const res = await this.ai.models.generateContent({ model: this.model, contents: this.buildPrompt(old) });
+        const text = res.text?.trim();
+        if (!text) throw new Error('要約が空でした');
+        this.summary = text;
+        const done = new Set(old);
+        this.entries = this.entries.filter((e) => !done.has(e));
+        fs.mkdirSync(path.dirname(this.summaryFile), { recursive: true });
+        fs.writeFileSync(this.summaryFile, `# ${new Date().toLocaleString('ja-JP')}\n\n${text}\n`);
+        log.info(`要約を更新 (${old.length} 件 → ${text.length} 文字, ${Date.now() - t0}ms)\n${text}`);
+      } catch (e) {
+        for (const o of old) delete o.sealed;
+        throw e;
+      }
     })().finally(() => (this.summarizing = null));
     return this.summarizing;
   }
