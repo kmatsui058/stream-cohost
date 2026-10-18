@@ -25,78 +25,25 @@
 <div id="placeholder"></div>
 <div id="sub"></div>
 <div id="status"></div>
-<script>
-// サーバーから {type:'say', id, text, wav} を受け取って再生し、終わったら {type:'ended', id} を返す。
-// 口パクは再生音量（RMS）がしきい値を超えたら open 画像に切り替えるだけの簡易方式。
-const CLOSED = '/char/closed.png', OPEN = '/char/open.png';
-const charEl = document.getElementById('char'), ph = document.getElementById('placeholder');
-const sub = document.getElementById('sub'), statusEl = document.getElementById('status');
-let usePlaceholder = false;
-charEl.onerror = () => { usePlaceholder = true; charEl.style.display = 'none'; ph.style.display = 'block'; };
-charEl.src = CLOSED;
-new Image().src = OPEN; // 先読み
+<script type="module">
+  // ロジックは overlay-core.js（テスト対象）。ここはブラウザの部品を渡して起動するだけ
+  import { createOverlayClient } from '/overlay-core.js';
 
-const ctx = new AudioContext();
-const analyser = ctx.createAnalyser();
-analyser.fftSize = 512;
-analyser.connect(ctx.destination);
-const samples = new Float32Array(analyser.fftSize);
-let current = null; // { id, src }
-let ws;
-
-function setMouth(open) {
-  if (usePlaceholder) ph.style.setProperty('--mouth', open ? '40px' : '6px');
-  else { const want = open ? OPEN : CLOSED; if (!charEl.src.endsWith(want)) charEl.src = want; }
-  charEl.classList.toggle('talk', open);
-}
-(function lip() {
-  if (current) {
-    analyser.getFloatTimeDomainData(samples);
-    let s = 0; for (const v of samples) s += v * v;
-    setMouth(Math.sqrt(s / samples.length) > 0.04);
-  } else setMouth(false);
-  requestAnimationFrame(lip);
-})();
-
-function stopCurrent() {
-  if (!current) return;
-  try { current.src.onended = null; current.src.stop(); } catch {}
-  current = null;
-  sub.classList.remove('show');
-}
-
-async function say({ id, text, wav }) {
-  stopCurrent();
-  if (ctx.state === 'suspended') await ctx.resume();
-  const bytes = Uint8Array.from(atob(wav), (c) => c.charCodeAt(0));
-  const buf = await ctx.decodeAudioData(bytes.buffer);
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  src.connect(analyser);
-  current = { id, src };
-  sub.textContent = text;
-  sub.classList.add('show');
-  src.onended = () => {
-    if (current?.id !== id) return;
-    current = null;
-    sub.classList.remove('show');
-    ws.send(JSON.stringify({ type: 'ended', id }));
-  };
-  src.start();
-}
-
-function connect() {
-  ws = new WebSocket(`ws://${location.host}`);
-  ws.onopen = () => (statusEl.textContent = '');
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    if (m.type === 'say') say(m).catch((err) => { console.error(err); ws.send(JSON.stringify({ type: 'ended', id: m.id })); });
-    if (m.type === 'stop') stopCurrent();
-  };
-  // サーバー未起動・再起動時は赤字で表示して 2 秒おきに再接続（配信に映るのが嫌なら status を消してよい）
-  ws.onclose = () => { statusEl.textContent = 'cohost: 未接続'; stopCurrent(); setTimeout(connect, 2000); };
-}
-connect();
+  const client = createOverlayClient({
+    audioContext: new AudioContext(),
+    connect: () => new WebSocket(`ws://${location.host}`),
+    elements: {
+      char: document.getElementById('char'),
+      placeholder: document.getElementById('placeholder'),
+      sub: document.getElementById('sub'),
+      status: document.getElementById('status'),
+    },
+  });
+  client.start();
+  (function loop() {
+    client.lipStep();
+    requestAnimationFrame(loop);
+  })();
 </script>
 </body>
 </html>

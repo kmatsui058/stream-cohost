@@ -21,18 +21,36 @@ export class Overlay extends EventEmitter {
     this.clients = new Set();
   }
 
+  // 公開フォルダ内のファイルパスを返す。外を指す・不正な・存在しない場合は null
+  static resolvePublic(reqUrl) {
+    let urlPath;
+    try {
+      urlPath = decodeURIComponent(new URL(reqUrl, 'http://x').pathname);
+    } catch {
+      return null; // 不正なエンコード
+    }
+    const file = path.resolve(PUBLIC, '.' + (urlPath === '/' ? '/overlay.html' : urlPath));
+    const rel = path.relative(PUBLIC, file);
+    // デコード後の "..\" なども、正規化したうえで公開フォルダの外なら拒否する
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return null;
+    return file;
+  }
+
+  // 待ち受けを始め、実際のポート番号を返す（port: 0 なら空きポート）
   start() {
     const server = http.createServer((req, res) => {
-      const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-      const file = path.join(PUBLIC, urlPath === '/' ? 'overlay.html' : urlPath);
-      if (!file.startsWith(PUBLIC) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
+      const file = Overlay.resolvePublic(req.url);
+      if (!file) {
         res.writeHead(404).end();
         return;
       }
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
       fs.createReadStream(file).pipe(res);
     });
+    this.server = server;
     const wss = new WebSocketServer({ server });
+    this.wss = wss;
     wss.on('connection', (ws) => {
       this.clients.add(ws);
       log.info(`オーバーレイ接続 (計 ${this.clients.size})`);
@@ -47,7 +65,20 @@ export class Overlay extends EventEmitter {
         log.warn(`オーバーレイ切断 (残 ${this.clients.size})`);
       });
     });
-    server.listen(this.port, '127.0.0.1', () => log.info(`オーバーレイ: http://127.0.0.1:${this.port}/`));
+    return new Promise((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(this.port, '127.0.0.1', () => {
+        const { port } = server.address();
+        log.info(`オーバーレイ: http://127.0.0.1:${port}/`);
+        resolve(port);
+      });
+    });
+  }
+
+  close() {
+    for (const c of this.clients) c.terminate();
+    this.wss?.close();
+    return new Promise((r) => (this.server ? this.server.close(() => r()) : r()));
   }
 
   get hasClient() {
