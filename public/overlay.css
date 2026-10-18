@@ -2,32 +2,62 @@
 html, body { margin: 0; background: transparent; overflow: hidden; }
 body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
 
-/* 左下にまとめる: [SOUND ONLY 表示][字幕] */
+/*
+ * 左下にまとめる: [立ち絵 または SOUND ONLY][字幕]
+ * --brightness（0.35〜1）と .speaking は overlay-core.js が音量に合わせて更新する。
+ * .has-character は立ち絵フォルダに default.png と smile.png がそろっているときに付く。
+ */
 #cohost {
+  --brightness: 0.35;
+  /* 立ち絵の切り取り（元画像 1000x2400 の頭〜胸のあたりをバストアップにする） */
+  --portrait-w: 220px;     /* 表示枠の幅 */
+  --portrait-h: 280px;     /* 表示枠の高さ */
+  --portrait-scale: 330px; /* 元画像を表示する幅（= 枠に対する拡大率） */
+  --portrait-x: -55px;     /* 元画像の左右位置 */
+  --portrait-y: -45px;     /* 元画像の上下位置 */
   position: absolute; left: 24px; bottom: 24px;
   display: flex; align-items: flex-end; gap: 12px;
 }
 
-/* SOUND ONLY 表示。--brightness（0.35〜1）は overlay-core.js が音量に合わせて更新する */
-#panel {
-  --brightness: 0.35;
-  padding: 10px 16px 8px;
-  background: rgba(8, 8, 12, 0.88);
-  border: 1px solid rgba(232, 72, 72, 0.9);
-  box-sizing: border-box;
-  filter: brightness(var(--brightness));
-  transition: box-shadow 0.15s;
+/* 明るさは相方の表示だけに掛ける（字幕は常に読めるように） */
+#avatar { position: relative; filter: brightness(var(--brightness)); }
+
+/* 立ち絵（バストアップ） */
+.portrait {
+  display: none; position: relative;
+  width: var(--portrait-w); height: var(--portrait-h); overflow: hidden;
 }
-#panel.speaking { box-shadow: 0 0 14px rgba(232, 72, 72, 0.55); }
-#panel .label {
+.has-character .portrait { display: block; }
+.portrait img {
+  position: absolute; left: var(--portrait-x); top: var(--portrait-y);
+  width: var(--portrait-scale); height: auto;
+}
+.portrait .face-smile { opacity: 0; transition: opacity 0.08s; }
+.speaking .portrait .face-smile { opacity: 1; }
+
+/* 立ち絵がないときの SOUND ONLY 表示 */
+.sound-only {
+  padding: 10px 16px 6px;
+  background: rgba(8, 8, 12, 0.88); border: 1px solid rgba(232, 72, 72, 0.9);
   color: #e84848; font: 700 20px/1 "Segoe UI", "Arial Black", sans-serif;
   letter-spacing: 0.12em; text-align: center; white-space: nowrap;
+  transition: box-shadow 0.15s;
 }
-#panel .name {
-  margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(232, 72, 72, 0.5);
-  color: #f2d6d6; font: 600 12px/1.2 "Segoe UI", sans-serif;
-  letter-spacing: 0.18em; text-align: center;
+.speaking .sound-only { box-shadow: 0 0 14px rgba(232, 72, 72, 0.55); }
+.has-character .sound-only { display: none; }
+
+/* 表示名（立ち絵の下端、または SOUND ONLY の中に重ねる） */
+.name {
+  color: #f2e6ea; font: 600 12px/1.2 "Segoe UI", sans-serif; letter-spacing: 0.18em; text-align: center;
   min-height: 1.2em;
+}
+.has-character .name {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 0;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+}
+#cohost:not(.has-character) .name {
+  padding: 0 16px 8px; background: rgba(8, 8, 12, 0.88);
+  border: 1px solid rgba(232, 72, 72, 0.9); border-top: none;
 }
 
 /* 字幕: 表示の右に小さく */

@@ -47,6 +47,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       port: num('OVERLAY_PORT', 8787),
       // 画面左下の SOUND ONLY 表示に出す相方の名前
       displayName: env.COHOST_DISPLAY_NAME || 'ORÐA-VÁR',
+      // 立ち絵フォルダ（default.png と smile.png）。空なら SOUND ONLY 表示
+      characterDir: env.CHARACTER_DIR || '',
     },
     director: {
       // 無音がこの秒数（min〜max でランダム）続いたら自発的に喋らせる。0 で無効

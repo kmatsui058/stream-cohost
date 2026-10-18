@@ -1,13 +1,16 @@
 // 配信に重ねる画面のロジック。ブラウザ（OBS のブラウザソース）で動き、テストでは偽物を渡して動かす。
 //
 // サーバーから {type:'say', id, text, wav(base64)} を受けたら再生し、終わったら {type:'ended', id} を返す。
-// {type:'stop'} で再生中の音声を止める。{type:'profile', name} で表示名を受け取る。
-// 立ち絵は使わず、左下の SOUND ONLY 表示の明るさで「喋っている」ことを伝える。
+// {type:'stop'} で再生中の音声を止める。{type:'profile', name, character} で表示名と立ち絵の有無を受け取る。
+// 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
 export const DIM = 0.35; // 喋っていないときの明るさ
 export const LEVEL_FULL = 0.15; // この RMS 以上で明るさ 100%
 export const ATTACK = 0.5; // 明るくなるときの追従の速さ（1 フレームあたり）
 export const RELEASE = 0.08; // 暗くなるときの追従の速さ（ゆっくり戻す）
+// 表情の切り替えのしきい値。入る明るさと戻る明るさを変えて、音量の細かな揺れで行き来しないようにする
+export const SPEAK_ON = DIM + 0.1;
+export const SPEAK_OFF = DIM + 0.04;
 export const RECONNECT_MS = 2000;
 
 export function rms(samples) {
@@ -27,7 +30,7 @@ function base64ToArrayBuffer(b64) {
  * @param {object} deps
  * @param {AudioContext} deps.audioContext
  * @param {() => WebSocket} deps.connect  サーバーへの WebSocket を開く関数
- * @param {{panel: HTMLElement, name: HTMLElement, sub: HTMLElement, status: HTMLElement}} deps.elements
+ * @param {{root: HTMLElement, name: HTMLElement, sub: HTMLElement, status: HTMLElement}} deps.elements
  * @param {(fn: Function, ms: number) => unknown} [deps.schedule]  再接続の予約（既定 setTimeout）
  */
 export function createOverlayClient({ audioContext: ctx, connect: openSocket, elements: el, schedule = setTimeout }) {
@@ -36,6 +39,7 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
   analyser.connect(ctx.destination);
   const samples = new Float32Array(analyser.fftSize);
   let brightness = DIM;
+  let speaking = false;
   let current = null; // { id, src }
   let ws = null;
 
@@ -55,8 +59,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       target = DIM + (1 - DIM) * Math.min(1, rms(samples) / LEVEL_FULL);
     }
     brightness += (target - brightness) * (target > brightness ? ATTACK : RELEASE);
-    el.panel.style.setProperty('--brightness', brightness.toFixed(3));
-    el.panel.classList.toggle('speaking', brightness > DIM + 0.05);
+    if (!speaking && brightness > SPEAK_ON) speaking = true;
+    else if (speaking && brightness < SPEAK_OFF) speaking = false;
+    el.root.style.setProperty('--brightness', brightness.toFixed(3));
+    el.root.classList.toggle('speaking', speaking);
   }
 
   function stopCurrent() {
@@ -105,7 +111,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       }
       if (m.type === 'say') return say(m);
       if (m.type === 'stop') stopCurrent();
-      if (m.type === 'profile') el.name.textContent = m.name ?? '';
+      if (m.type === 'profile') {
+        el.name.textContent = m.name ?? '';
+        el.root.classList.toggle('has-character', !!m.character);
+      }
     };
     // サーバー未起動・再起動時は赤字で表示して再接続（配信に映るのが嫌なら #status を消してよい）
     ws.onclose = () => {

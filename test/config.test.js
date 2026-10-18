@@ -15,7 +15,7 @@ describe('operator-controls / 設定の既定値', () => {
     expect(c.mic.ffmpeg).toBe('ffmpeg');
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
     expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
-    expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR' });
+    expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR', characterDir: '' });
     expect(c.director).toEqual({ idleMinSec: 25, idleMaxSec: 45, bargeIn: true, gateMicWhileSpeaking: false });
     expect(c.youtube.pollMinMs).toBe(10000);
   });
@@ -40,6 +40,7 @@ describe('operator-controls / 設定の既定値（声と表示名）', () => {
     expect(c.voicevox.speaker).toBe(47);
     expect(c.overlay.displayName).toBe('ORÐA-VÁR');
     expect(loadConfig({ COHOST_DISPLAY_NAME: 'ORDA' }, readPersona).overlay.displayName).toBe('ORDA');
+    expect(loadConfig({ CHARACTER_DIR: 'C:\\chars' }, readPersona).overlay.characterDir).toBe('C:\\chars');
   });
 });
 

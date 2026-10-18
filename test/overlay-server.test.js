@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import http from 'node:http';
 import path from 'node:path';
 import { describe, it, expect, afterEach } from 'vitest';
@@ -108,13 +109,59 @@ describe('stream-overlay（サーバー側）', () => {
       for (const s of sockets) expect(cmds(s)).toEqual([{ type: 'say', id: 1, text: 'やあ', wav: 'AA==' }, { type: 'stop' }]);
     });
 
-    it('表示名を受け取る / 画面が接続する: 設定された表示名を送る', async () => {
-      overlay = new Overlay({ port: 0, displayName: 'ORÐA-VÁR' });
+    const charDir = (files) => {
+      const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-char-'));
+      const dir = path.join(base, 'char');
+      fs.mkdirSync(dir);
+      for (const f of files) fs.writeFileSync(path.join(dir, f), `PNG:${f}`);
+      fs.writeFileSync(path.join(base, 'secret.txt'), 'SECRET'); // 立ち絵フォルダの 1 つ上
+      return dir;
+    };
+    const profileOf = async (characterDir) => {
+      overlay = new Overlay({ port: 0, displayName: 'ORÐA-VÁR', characterDir });
       const port = await overlay.start();
       const ws = await open(port);
       sockets.push(ws);
       await until(() => ws.received.length === 1);
-      expect(ws.received[0]).toEqual({ type: 'profile', name: 'ORÐA-VÁR' });
+      return ws.received[0];
+    };
+
+    it('表示名と立ち絵の有無 / 立ち絵ありで画面が接続する: 表示名と「立ち絵あり」を送る', async () => {
+      expect(await profileOf(charDir(['default.png', 'smile.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: true });
+    });
+
+    it('表示名と立ち絵の有無 / 立ち絵が片方しかない: 「立ち絵なし」を送る', async () => {
+      expect(await profileOf(charDir(['default.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false });
+    });
+
+    it('表示名と立ち絵の有無 / 立ち絵フォルダが未設定: 「立ち絵なし」を送る', async () => {
+      expect(await profileOf('')).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false });
+    });
+
+    it('立ち絵の画像を配信する / 立ち絵を取得する: フォルダ内の smile.png を返す', async () => {
+      overlay = new Overlay({ port: 0, characterDir: charDir(['default.png', 'smile.png', 'angry.png']) });
+      const port = await overlay.start();
+      const r = await get(port, '/character/smile.png');
+      expect(r.status).toBe(200);
+      expect(r.type).toBe('image/png');
+      expect(r.body).toBe('PNG:smile.png');
+    });
+
+    it.each(['/character/angry.png', '/character/..%2fsecret.txt', '/character/..%5csecret.txt', '/character/'])(
+      '立ち絵の画像を配信する / ほかのファイルを指定する（%s）: 404',
+      async (p) => {
+        overlay = new Overlay({ port: 0, characterDir: charDir(['default.png', 'smile.png', 'angry.png']) });
+        const port = await overlay.start();
+        const r = await get(port, p);
+        expect(r.status).toBe(404);
+        expect(r.body).not.toContain('SECRET');
+      },
+    );
+
+    it('立ち絵フォルダが未設定なら /character/ は 404', async () => {
+      overlay = new Overlay({ port: 0 });
+      const port = await overlay.start();
+      expect((await get(port, '/character/default.png')).status).toBe(404);
     });
 
     it('画面が新しく接続するたびに connect を 1 回出す', async () => {
