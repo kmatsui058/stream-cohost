@@ -1,0 +1,8 @@
+[
+  { "id": "topic-news", "type": "user", "expect": "speak", "note": "最近のニュースからネタを頼む", "text": "オルダ、なんか話のネタない? 最近のニュースとかで。" },
+  { "id": "topic-ro-update", "type": "user", "expect": "speak", "note": "ゲームの最近の動きを聞く", "text": "最近のラグナロクオンラインのアップデートで、何か話題になってることある?" },
+  { "id": "topic-today", "type": "user", "expect": "speak", "note": "今日の日付に結びついたネタ", "text": "今日って何の日か知ってる? なんかネタになりそうなことある?" },
+  { "id": "topic-request", "type": "user", "expect": "speak", "note": "トークテーマを頼む（検索するかはモデル次第）", "text": "なんかトークテーマ用意してよ。" },
+  { "id": "fact-angrboda", "type": "user", "expect": "speak", "note": "対照: 検索不要な事実の質問", "text": "北欧神話におけるアングルボダの情報を教えてください。" },
+  { "id": "mutter-oops", "type": "user", "expect": "silent", "note": "対照: 黙るべき独り言", "text": "あ、いかんいかんいかん。" }
+]

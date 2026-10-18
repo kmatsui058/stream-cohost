@@ -53,6 +53,11 @@ describe('prompt-eval / 黙る／話すの正解と照合する', () => {
     expect(matchesExpect('ネタを出します。', 'silent')).toBe(false);
   });
 
+  it('返事が無いときは、どちらの正解とも合わない', () => {
+    expect(matchesExpect('', 'speak')).toBe(false);
+    expect(matchesExpect('', 'silent')).toBe(false);
+  });
+
   it('正解が書かれていなければ照合しない', () => {
     expect(matchesExpect('なんでも', undefined)).toBeNull();
   });
