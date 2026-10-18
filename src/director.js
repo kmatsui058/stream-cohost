@@ -7,6 +7,17 @@
 import { logger } from './log.js';
 
 const log = logger('director');
+
+// 沈黙時に相方から話しかけるときの話題の切り口。毎回この中から選び、同じものは続けない
+export const IDLE_TOPICS = [
+  '画面に映っている具体的なもの（場所、敵、ドロップ、ステータス、装備など）を 1 つ選んで、配信者に質問してください。',
+  '今の状況に関係する RO の小ネタを 1 つ話して、配信者の考えを聞いてください。確かなことだけを話してください。',
+  '視聴者がチャットで答えやすい問いかけを、視聴者に向けてしてください。',
+  'これまでの会話から話題を 1 つ拾い直して、その続きを配信者に聞いてください。',
+  'セージとしての立ち回りや、次の目標について、提案するか質問してください。',
+];
+// どの切り口でも付ける締めの指示
+export const IDLE_CLOSING = '「画面が変わりましたね」のような感想だけで終わらせず、配信者や視聴者が答えやすい具体的な質問か提案で締めてください。';
 const SENTENCE_END = /[^。！？!?♪\n]*[。！？!?♪\n]+/g;
 const now = () => Date.now();
 
@@ -20,6 +31,7 @@ export class Director {
     // 相方の声が誰かに届く状態か（= 配信に重ねる画面がつながっているか）
     this.isAudible = isAudible;
     this.holding = false; // 画面が未接続のため自発発話を控えている
+    this.lastTopic = -1; // 直前に使った話題の切り口
     this.buf = ''; // 文になりきっていない出力
     this.modelBusy = false; // Gemini が応答を生成中
     this.awaitingSince = 0; // テキスト注入後、応答待ちの開始時刻
@@ -111,6 +123,19 @@ export class Director {
     return true;
   }
 
+  // 直前と違う切り口を選び、合図の文を作る
+  idlePrompt() {
+    const n = IDLE_TOPICS.length;
+    let i;
+    if (this.lastTopic < 0) i = Math.floor(this.random() * n) % n;
+    else {
+      i = Math.floor(this.random() * (n - 1)) % (n - 1); // 直前のものを除いた n-1 個から選ぶ
+      if (i >= this.lastTopic) i++;
+    }
+    this.lastTopic = i;
+    return `【合図】配信者がしばらく黙っています。相方として話題を振ってください。${IDLE_TOPICS[i]}${IDLE_CLOSING}`;
+  }
+
   // 誰かが話したのと同じ扱いにして、沈黙の数え直しを始める（画面がつながったときなど）
   markActivity() {
     this.lastActivity = now();
@@ -140,7 +165,7 @@ export class Director {
     }
     if (this.cfg.idleMinSec > 0 && now() - this.lastActivity > this.nextIdleSec * 1000) {
       this.nextIdleSec = this.rollIdle();
-      this.inject('【合図】配信者がしばらく黙っています。直前の画面や話の流れを踏まえて、相方として自然に一言どうぞ。');
+      this.inject(this.idlePrompt());
     }
   }
 
