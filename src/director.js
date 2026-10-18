@@ -17,6 +17,11 @@ export const IDLE_TOPICS = [
   '今の状況や配信者の行動を観察して気づいたことや、自分なりの仮説を一言述べて、配信者に確かめてください。',
 ];
 // どの切り口でも付ける締めの指示
+// 切り口 i の合図の文（評価でも同じ文を使う）
+export function idlePromptText(i) {
+  return `【合図】配信者がしばらく黙っています。話し相手として話題を振ってください。${IDLE_TOPICS[i]}${IDLE_CLOSING}`;
+}
+
 export const IDLE_CLOSING =
   '観察したこと、そこから立てた仮説、理解するための具体的な問いのどれかで締めて、配信者や視聴者が答えたくなる形にしてください。' +
   '直前の発言とは違う角度から、新しい言い回しで話してください。';
@@ -135,7 +140,7 @@ export class Director {
       if (i >= this.lastTopic) i++;
     }
     this.lastTopic = i;
-    return `【合図】配信者がしばらく黙っています。話し相手として話題を振ってください。${IDLE_TOPICS[i]}${IDLE_CLOSING}`;
+    return idlePromptText(i);
   }
 
   // 誰かが話したのと同じ扱いにして、沈黙の数え直しを始める（画面がつながったときなど）
