@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createOverlayClient, rms, DIM, RECONNECT_MS } from '../public/overlay-core.js';
+import { createOverlayClient, rms, DIM, LEVEL_FULL, SPEAK_ON_FRAC, SPEAK_OFF_FRAC, RECONNECT_MS } from '../public/overlay-core.js';
+
+// 明るさの幅（DIM〜1）に対する割合 f の明るさになる音量
+const levelFor = (f) => LEVEL_FULL * f;
+const at = (f) => DIM + (1 - DIM) * f;
 import { fakeAudioContext, fakeSocketFactory, fakeElements } from './fakes/browser.js';
 
 const WAV = Buffer.from('RIFF....').toString('base64');
@@ -40,7 +44,7 @@ describe('stream-overlay（画面側）', () => {
     it('立ち絵フォルダを設定していない: 起動直後は SOUND ONLY が暗い状態', () => {
       expect(el.root.classList.contains('has-character')).toBe(false);
       expect(brightness()).toBeCloseTo(DIM);
-      expect(DIM).toBe(0.35);
+      expect(DIM).toBe(0.7);
       expect(speaking()).toBe(false);
       expect(el.sub.classList.contains('show')).toBe(false);
     });
@@ -82,10 +86,10 @@ describe('stream-overlay（画面側）', () => {
 
     it('しきい値付近で行き来しない（smile に入る明るさと戻る明るさが違う）', async () => {
       await play();
-      ctx.level = 0.03; // 明るさ ≒ DIM + 0.13 → smile に入る
+      ctx.level = levelFor(SPEAK_ON_FRAC + 0.1); // 入るしきい値より上 → smile に入る
       steps(60);
       expect(speaking()).toBe(true);
-      ctx.level = 0.018; // 明るさ ≒ DIM + 0.08 → 入るしきい値より下だが、戻るしきい値より上
+      ctx.level = levelFor((SPEAK_ON_FRAC + SPEAK_OFF_FRAC) / 2); // 入るしきい値より下だが、戻るしきい値より上
       steps(120);
       expect(speaking()).toBe(true);
       ctx.level = 0;
@@ -111,13 +115,13 @@ describe('stream-overlay（画面側）', () => {
       ctx.level = 0.3;
       steps(10);
       expect(brightness()).toBeGreaterThan(0.95);
-      ctx.level = 0.075;
+      ctx.level = levelFor(0.5); // 中くらいの音量なら中くらいの明るさ
       steps(60);
-      expect(brightness()).toBeGreaterThan(0.6);
-      expect(brightness()).toBeLessThan(0.75);
+      expect(brightness()).toBeGreaterThan(at(0.4));
+      expect(brightness()).toBeLessThan(at(0.6));
       ctx.level = 0;
       client.levelStep();
-      expect(brightness()).toBeGreaterThan(0.6);
+      expect(brightness()).toBeGreaterThan(at(0.4)); // 1 フレームでは戻らない
       steps(120);
       expect(brightness()).toBeCloseTo(DIM, 2);
     });

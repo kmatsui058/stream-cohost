@@ -4,13 +4,16 @@
 // {type:'stop'} で再生中の音声を止める。{type:'profile', name, character} で表示名と立ち絵の有無を受け取る。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
-export const DIM = 0.35; // 喋っていないときの明るさ
+export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
 export const LEVEL_FULL = 0.15; // この RMS 以上で明るさ 100%
 export const ATTACK = 0.5; // 明るくなるときの追従の速さ（1 フレームあたり）
 export const RELEASE = 0.08; // 暗くなるときの追従の速さ（ゆっくり戻す）
-// 表情の切り替えのしきい値。入る明るさと戻る明るさを変えて、音量の細かな揺れで行き来しないようにする
-export const SPEAK_ON = DIM + 0.1;
-export const SPEAK_OFF = DIM + 0.04;
+// 表情の切り替えのしきい値（明るさの幅 DIM〜1 に対する割合）。入る明るさと戻る明るさを変えて、
+// 音量の細かな揺れで行き来しないようにする
+export const SPEAK_ON_FRAC = 0.25;
+export const SPEAK_OFF_FRAC = 0.1;
+const SPEAK_ON = DIM + (1 - DIM) * SPEAK_ON_FRAC;
+const SPEAK_OFF = DIM + (1 - DIM) * SPEAK_OFF_FRAC;
 export const RECONNECT_MS = 2000;
 
 export function rms(samples) {
