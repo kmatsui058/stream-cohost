@@ -70,6 +70,37 @@ describe('turn-taking', () => {
     });
   });
 
+  describe('黙る合図の返事は読み上げない', () => {
+    it('黙ると判断した: 「スルー。」だけなら読み上げない', () => {
+      make();
+      gemini.emit('modelText', 'スルー。');
+      gemini.emit('turnComplete');
+      expect(pushed()).toEqual([]);
+    });
+
+    it('句読点なしで届いた: 「スルー」だけでも読み上げない（細切れでも）', () => {
+      make();
+      gemini.emit('modelText', 'スル');
+      gemini.emit('modelText', 'ー ');
+      gemini.emit('turnComplete');
+      expect(pushed()).toEqual([]);
+    });
+
+    it('文の一部に含まれる: 通常どおり読み上げる', () => {
+      make();
+      gemini.emit('modelText', '今回はスルーしましょう。');
+      gemini.emit('turnComplete');
+      expect(pushed()).toEqual(['今回はスルーしましょう。']);
+    });
+
+    it('黙ったあとも、生成中の状態は解除される', () => {
+      make();
+      gemini.emit('modelText', 'スルー。');
+      gemini.emit('turnComplete');
+      expect(director.quiet).toBe(true);
+    });
+  });
+
   describe('配信者の割り込みで黙る', () => {
     it('相方の発話中に配信者が話す: 発話が止まり、記憶に記録する', () => {
       make();

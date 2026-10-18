@@ -51,8 +51,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       characterDir: env.CHARACTER_DIR || '',
     },
     director: {
-      // 無音がこの秒数（min〜max でランダム）続いたら自発的に喋らせる。0 で無効
-      idleMinSec: num('IDLE_MIN_SEC', 25),
+      // 無音がこの秒数（min〜max でランダム）続いたら自発的に喋らせる。0 で無効（既定。話を広げるのは配信者が主導する）
+      idleMinSec: num('IDLE_MIN_SEC', 0),
       idleMaxSec: num('IDLE_MAX_SEC', 45),
       // 自分の声が届いたら相方の発話を止める（バージイン）
       bargeIn: bool('BARGE_IN', true),

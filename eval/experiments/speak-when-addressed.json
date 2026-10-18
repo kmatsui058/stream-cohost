@@ -1,0 +1,7 @@
+{
+  "description": "話しかけられたときだけ話す persona（スルー）と、直前の版（C 相当: 長さを緩めた persona）の比較",
+  "variants": [
+    { "name": "前の版（長さを緩めた persona）", "persona": "file:eval/personas/relaxed-length.md", "model": "gemini-3.8-live" },
+    { "name": "新しい persona（話しかけられたときだけ）", "persona": "file:persona.md", "model": "gemini-3.8-live" }
+  ]
+}

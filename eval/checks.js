@@ -1,9 +1,11 @@
 // 評価用: 相方の返事をルールでチェックする。
 // ここにある言い回しの一覧は、プロンプトに入れるものではなく、評価で検出するためのもの。
+import { isSilentReply } from '../src/director.js';
 
 export const CHECKS = [
   { key: 'empty', label: '返事なし', test: (t) => !t.trim() },
-  { key: 'long', label: '70字超', test: (t) => [...t].length > 70 },
+  { key: 'silent', label: '黙った（スルー）', test: (t) => isSilentReply(t) },
+  { key: 'long', label: '120字超', test: (t) => [...t].length > 120 },
   { key: 'question', label: '疑問で終わる', test: (t) => /[?？]$|か。?$/.test(t.trim()) },
   { key: 'desuNe', label: '「ですね」', test: (t) => /ですね/.test(t) },
   {
@@ -20,13 +22,25 @@ export const CHECKS = [
   { key: 'wrongName', label: '呼び方の誤り', test: (t) => /小波|さざなみ|おこは|夕暮/.test(t) },
 ];
 
-export function checkReply(text) {
-  return Object.fromEntries(CHECKS.map((c) => [c.key, c.test(text ?? '')]));
+export const isSilent = (text) => isSilentReply(text ?? '');
+
+// 正解（silent: 黙るべき / speak: 話すべき）と合っているか。正解が無ければ null
+export function matchesExpect(text, expect) {
+  if (expect === undefined) return null;
+  return isSilent(text) === (expect === 'silent');
 }
 
-// 項目ごとに、該当した返事の数を数える
+export function checkReply(text, expect) {
+  const r = Object.fromEntries(CHECKS.map((c) => [c.key, c.test(text ?? '')]));
+  r.expectOk = matchesExpect(text, expect);
+  return r;
+}
+
+// 項目ごとに、該当した返事の数を数える。正解との一致は、照合したケースの中で数える
 export function summarize(results) {
   const s = { total: results.length };
   for (const c of CHECKS) s[c.key] = results.filter((r) => r[c.key]).length;
+  s.expectTotal = results.filter((r) => r.expectOk !== null && r.expectOk !== undefined).length;
+  s.expectMatched = results.filter((r) => r.expectOk === true).length;
   return s;
 }

@@ -1,0 +1,9 @@
+{
+  "description": "浅さの原因の切り分け: Live モデルの考える量と、persona の長さの縛り",
+  "variants": [
+    { "name": "A 今の persona / live", "persona": "file:persona.md", "model": "gemini-3.8-live" },
+    { "name": "B 今の persona / extended-thinking(high)", "persona": "file:persona.md", "model": "gemini-3.8-live-extended-thinking", "thinkingLevel": "HIGH" },
+    { "name": "C 長さを緩めた persona / live", "persona": "file:eval/personas/relaxed-length.md", "model": "gemini-3.8-live" },
+    { "name": "D 長さを緩めた persona / extended-thinking(high)", "persona": "file:eval/personas/relaxed-length.md", "model": "gemini-3.8-live-extended-thinking", "thinkingLevel": "HIGH" }
+  ]
+}

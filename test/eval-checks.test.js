@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { describe, it, expect } from 'vitest';
-import { checkReply, summarize, CHECKS } from '../eval/checks.js';
+import { checkReply, summarize, CHECKS, isSilent, matchesExpect } from '../eval/checks.js';
 
 describe('prompt-eval / 返事をルールでチェックする', () => {
   it('サポート口調の返事: サポート口調と、疑問で終わることを記録する', () => {
@@ -16,9 +16,8 @@ describe('prompt-eval / 返事をルールでチェックする', () => {
   });
 
   it('長さ・「ですね」・共感の定型句・自己言及を記録する', () => {
-    const long = 'あ'.repeat(71);
-    expect(checkReply(long).long).toBe(true);
-    expect(checkReply('あ'.repeat(70)).long).toBe(false);
+    expect(checkReply('あ'.repeat(121)).long).toBe(true);
+    expect(checkReply('あ'.repeat(120)).long).toBe(false);
     expect(checkReply('いよいよですね。').desuNe).toBe(true);
     expect(checkReply('次はどんな発見があるか楽しみです。').empathy).toBe(true);
     expect(checkReply('言葉の番人として、お詫びします。').selfRef).toBe(true);
@@ -42,6 +41,29 @@ describe('prompt-eval / 返事をルールでチェックする', () => {
   });
 });
 
+describe('prompt-eval / 黙る／話すの正解と照合する', () => {
+  it('黙るべき場面で黙った: 正解と合う', () => {
+    expect(matchesExpect('スルー。', 'silent')).toBe(true);
+    expect(isSilent(' スルー ')).toBe(true);
+  });
+
+  it('話すべき場面で黙った: 正解と合わない', () => {
+    expect(matchesExpect('スルー', 'speak')).toBe(false);
+    expect(matchesExpect('ネタを出します。', 'speak')).toBe(true);
+    expect(matchesExpect('ネタを出します。', 'silent')).toBe(false);
+  });
+
+  it('正解が書かれていなければ照合しない', () => {
+    expect(matchesExpect('なんでも', undefined)).toBeNull();
+  });
+
+  it('集計: 正解と合った数と、照合したケースの数を数える', () => {
+    const s = summarize([checkReply('スルー', 'silent'), checkReply('はい', 'silent'), checkReply('はい', 'speak'), checkReply('x')]);
+    expect(s.expectMatched).toBe(2);
+    expect(s.expectTotal).toBe(3);
+  });
+});
+
 describe('prompt-eval / 評価ケース', () => {
   it('ケースのファイルを読み込める（id・種類・入力がそろっている）', () => {
     const cases = JSON.parse(fs.readFileSync('eval/cases.json', 'utf8'));
@@ -51,6 +73,7 @@ describe('prompt-eval / 評価ケース', () => {
       expect(['user', 'idle', 'chat']).toContain(c.type);
       if (c.type === 'idle') expect(Number.isInteger(c.topic)).toBe(true);
       else expect(c.text.length).toBeGreaterThan(0);
+      if (c.expect !== undefined) expect(['silent', 'speak']).toContain(c.expect);
     }
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);
   });
