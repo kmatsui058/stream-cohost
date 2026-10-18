@@ -1,0 +1,7 @@
+{
+  "description": "聞かれたことに答えるだけの persona。答えが文脈をとらえて奥深いか。考える量の違い",
+  "variants": [
+    { "name": "A live＋検索", "persona": "file:eval/personas/answer-search.md", "model": "gemini-3.8-live", "tools": ["googleSearch"] },
+    { "name": "B extended-thinking(high)＋検索", "persona": "file:eval/personas/answer-search.md", "model": "gemini-3.8-live-extended-thinking", "thinkingLevel": "HIGH", "tools": ["googleSearch"] }
+  ]
+}

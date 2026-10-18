@@ -19,7 +19,8 @@ export const CHECKS = [
     test: (t) => /素敵|楽しみ|わかります|分かります|大変でした|胸に響|さすが|おっしゃる通り|ご指摘の通り/.test(t),
   },
   { key: 'selfRef', label: '自分の役割に言及', test: (t) => /言葉の番人|言葉を司る/.test(t) },
-  { key: 'wrongName', label: '呼び方の誤り', test: (t) => /小波|さざなみ|おこは|夕暮/.test(t) },
+  // 配信者は「マスター」と呼ぶ。名前（推測を含む）で呼んだら誤り
+  { key: 'wrongName', label: '呼び方の誤り', test: (t) => /小波|さざなみ|おこは|オコハ|夕暮/.test(t) },
 ];
 
 export const isSilent = (text) => isSilentReply(text ?? '');

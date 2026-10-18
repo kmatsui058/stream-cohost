@@ -1,0 +1,7 @@
+{
+  "description": "ユーモアのある persona に Google 検索を持たせた場合（ネタ向けのケース）",
+  "variants": [
+    { "name": "前（話しかけられたときだけ）＋検索＋ヒント", "persona": "file:eval/personas/search-hint.md", "model": "gemini-3.8-live", "tools": ["googleSearch"] },
+    { "name": "新（ユーモア）＋検索＋ヒント", "persona": "file:eval/personas/humor-search.md", "model": "gemini-3.8-live", "tools": ["googleSearch"] }
+  ]
+}

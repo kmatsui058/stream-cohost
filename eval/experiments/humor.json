@@ -1,0 +1,7 @@
+{
+  "description": "超越的でユーモアのある persona（文体も軽く）と、直前の persona の比較",
+  "variants": [
+    { "name": "前（話しかけられたときだけ）", "persona": "git:21831a3", "model": "gemini-3.8-live" },
+    { "name": "新（ユーモア）", "persona": "file:persona.md", "model": "gemini-3.8-live" }
+  ]
+}
