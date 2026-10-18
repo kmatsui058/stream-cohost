@@ -6,6 +6,7 @@ import { logger } from './log.js';
 
 const log = logger('obs');
 const RECONNECT_MS = 5000;
+export const BROADCAST_CHECK_MS = 15000;
 
 export class ObsCapture extends EventEmitter {
   constructor(cfg, { client = new OBSWebSocket() } = {}) {
@@ -18,6 +19,10 @@ export class ObsCapture extends EventEmitter {
     this.timer = null;
     this.busy = false;
     this.stopped = false;
+    this.broadcastId = null; // 最後に読んだ配信枠の動画 ID
+    this.broadcastTimer = null;
+    // 配信の開始・停止のときは、15 秒を待たずに配信枠を読み直す
+    this.obs.on('StreamStateChanged', () => this.checkBroadcast());
     this.obs.on('ConnectionClosed', () => {
       if (this.connected) log.warn(`OBS から切断されました。${RECONNECT_MS / 1000} 秒後に再接続します`);
       this.connected = false;
@@ -41,6 +46,7 @@ export class ObsCapture extends EventEmitter {
       await this.obs.connect(this.cfg.url, this.cfg.password);
       this.connected = true;
       log.info(`OBS に接続: ${this.cfg.url}`);
+      this.checkBroadcast();
     } catch (e) {
       log.warn(`OBS 接続失敗: ${e.message}`);
       this.scheduleReconnect();
@@ -53,6 +59,23 @@ export class ObsCapture extends EventEmitter {
     this.stopped = false;
     this.connect();
     this.timer = setInterval(() => this.capture(), this.cfg.frameIntervalMs);
+    this.broadcastTimer = setInterval(() => this.checkBroadcast(), BROADCAST_CHECK_MS);
+  }
+
+  // OBS で選んだ配信枠の動画 ID（配信設定の broadcast_id）を読み、変わったときだけ知らせる。
+  // 配信設定の変更を知らせるイベントは OBS に無いので、接続時・配信の開始停止時・定期的に読む
+  async checkBroadcast() {
+    if (!this.connected) return;
+    try {
+      const { streamServiceSettings: s } = await this.obs.call('GetStreamServiceSettings');
+      const id = s?.broadcast_id;
+      if (!id || id === this.broadcastId) return;
+      this.broadcastId = id;
+      log.info(`OBS で選ばれている配信枠: ${id}`);
+      this.emit('broadcast', id);
+    } catch (e) {
+      log.debug(`配信設定の読み取りに失敗: ${e.message}`);
+    }
   }
 
   async capture() {
@@ -79,6 +102,7 @@ export class ObsCapture extends EventEmitter {
   stop() {
     this.stopped = true;
     clearInterval(this.timer);
+    clearInterval(this.broadcastTimer);
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
     this.obs.disconnect?.();

@@ -157,6 +157,21 @@ describe('live-chat', () => {
     });
   });
 
+  describe('対象の配信の決め方', () => {
+    it('同じ配信枠が読み取られ続ける: 今の対象と同じ動画 ID ではやり直さない', async () => {
+      await make().start('v1');
+      await chat.start('v1');
+      expect(f.mock.calls.filter(([u]) => u.includes('/videos?'))).toHaveLength(1);
+    });
+
+    it('前回の開始に失敗した動画 ID は、もう一度指定すればやり直す', async () => {
+      f.mockImplementationOnce(async () => json({ items: [{ snippet: { title: 't', description: 'd' }, liveStreamingDetails: {} }] }));
+      await make().start('v1');
+      await chat.start('v1');
+      expect(f.mock.calls.filter(([u]) => u.includes('/videos?'))).toHaveLength(2);
+    });
+  });
+
   describe('対象の配信を切り替える', () => {
     it('動画 ID を変更する: 以前の配信の取得は行われなくなり、新しい配信を 1 本のループで取得する', async () => {
       // v1 の 2 回目の取得を通信中のまま止めておき、その間に v2 へ切り替える
