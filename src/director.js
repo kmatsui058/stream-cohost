@@ -11,9 +11,10 @@ const SENTENCE_END = /[^。！？!?♪\n]*[。！？!?♪\n]+/g;
 const now = () => Date.now();
 
 export class Director {
-  constructor({ gemini, speaker, cfg }) {
+  constructor({ gemini, speaker, memory, cfg }) {
     this.gemini = gemini;
     this.speaker = speaker;
+    this.memory = memory;
     this.cfg = cfg;
     this.buf = ''; // 文になりきっていない出力
     this.modelBusy = false; // Gemini が応答を生成中
@@ -28,6 +29,7 @@ export class Director {
     gemini.on('modelText', (t) => this.onModelText(t));
     gemini.on('turnComplete', () => this.onTurnComplete());
     gemini.on('interrupted', () => this.onInterrupted());
+    gemini.on('open', () => this.onSessionOpen());
     speaker.on('start', () => (this.lastActivity = now()));
     speaker.on('idle', () => (this.lastActivity = now()));
     setInterval(() => this.tick(), 1000);
@@ -41,6 +43,7 @@ export class Director {
   onUserText(t) {
     this.lastActivity = this.lastUserSpeech = now();
     log.debug(`🎤 ${t}`);
+    this.memory?.add('配信者', t);
     // 相方が喋っている最中に配信者が話し始めたら黙らせる
     if (this.cfg.bargeIn && this.speaker.speaking && t.trim().length >= 2) this.speaker.stop();
   }
@@ -49,6 +52,7 @@ export class Director {
     if (this.paused) return;
     this.modelBusy = true;
     this.awaitingSince = 0;
+    this.memory?.add('相方', t);
     this.buf += t;
     let consumed = 0;
     for (const m of this.buf.matchAll(SENTENCE_END)) {
@@ -70,6 +74,14 @@ export class Director {
     this.buf = '';
     this.modelBusy = false;
     this.speaker.stop();
+  }
+
+  // セッションを張り直した直後。生成途中で切り替わった場合 turnComplete が来ないので状態を戻す
+  onSessionOpen() {
+    if (!this.paused && this.buf.trim()) this.speaker.push(this.buf);
+    this.buf = '';
+    this.modelBusy = false;
+    this.awaitingSince = 0;
   }
 
   addChat(msgs) {
@@ -95,6 +107,7 @@ export class Director {
     if (this.paused || !this.gemini.ready || !this.quiet) return;
     if (this.chatQueue.length) {
       const lines = this.chatQueue.splice(0, 5).map((m) => `${m.author}: ${m.text}`);
+      for (const l of lines) this.memory?.add('チャット', l);
       this.inject(`【チャット】\n${lines.join('\n')}`);
       return;
     }

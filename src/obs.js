@@ -5,34 +5,52 @@ import { EventEmitter } from 'node:events';
 import { logger } from './log.js';
 
 const log = logger('obs');
+const RECONNECT_MS = 5000;
 
 export class ObsCapture extends EventEmitter {
-  constructor(cfg) {
+  constructor(cfg, { client = new OBSWebSocket() } = {}) {
     super();
     this.cfg = cfg;
-    this.obs = new OBSWebSocket();
+    this.obs = client;
     this.connected = false;
+    this.connecting = false;
+    this.reconnectTimer = null;
     this.timer = null;
     this.busy = false;
+    this.stopped = false;
     this.obs.on('ConnectionClosed', () => {
-      if (this.connected) log.warn('OBS から切断されました。5 秒後に再接続します');
+      if (this.connected) log.warn(`OBS から切断されました。${RECONNECT_MS / 1000} 秒後に再接続します`);
       this.connected = false;
-      setTimeout(() => this.connect(), 5000);
+      this.scheduleReconnect();
     });
   }
 
+  // 再接続の予約はここだけ。初回の失敗と切断イベントが重なっても 1 つしか予約しない
+  scheduleReconnect() {
+    if (this.reconnectTimer || this.stopped) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, RECONNECT_MS);
+  }
+
   async connect() {
+    if (this.connected || this.connecting) return;
+    this.connecting = true;
     try {
       await this.obs.connect(this.cfg.url, this.cfg.password);
       this.connected = true;
       log.info(`OBS に接続: ${this.cfg.url}`);
     } catch (e) {
-      // 失敗時は ConnectionClosed が飛んで再試行される
       log.warn(`OBS 接続失敗: ${e.message}`);
+      this.scheduleReconnect();
+    } finally {
+      this.connecting = false;
     }
   }
 
   start() {
+    this.stopped = false;
     this.connect();
     this.timer = setInterval(() => this.capture(), this.cfg.frameIntervalMs);
   }
@@ -56,5 +74,13 @@ export class ObsCapture extends EventEmitter {
     } finally {
       this.busy = false;
     }
+  }
+
+  stop() {
+    this.stopped = true;
+    clearInterval(this.timer);
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.obs.disconnect?.();
   }
 }

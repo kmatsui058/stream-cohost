@@ -1,10 +1,12 @@
 // エントリポイント: 各部品を起動して配線する。コンソールからの操作もここ。
 import readline from 'node:readline';
-import { config } from './config.js';
+import { loadConfig, missingRequired } from './config.js';
 import { logger } from './log.js';
 import { Mic } from './mic.js';
 import { ObsCapture } from './obs.js';
+import { GoogleGenAI } from '@google/genai';
 import { GeminiLive } from './gemini.js';
+import { Memory } from './memory.js';
 import { Overlay } from './overlay.js';
 import { Speaker } from './speaker.js';
 import { Director } from './director.js';
@@ -13,8 +15,10 @@ import { checkVoicevox } from './voicevox.js';
 
 const log = logger('main');
 
-if (!config.gemini.apiKey) {
-  log.error('GEMINI_API_KEY が .env にありません');
+const config = loadConfig();
+const missing = missingRequired(config);
+if (missing.length) {
+  log.error(`必須の設定が .env にありません: ${missing.join(', ')}`);
   process.exit(1);
 }
 
@@ -23,9 +27,20 @@ await checkVoicevox(config.voicevox.url);
 const overlay = new Overlay(config.overlay);
 overlay.start();
 
-const gemini = new GeminiLive(config.gemini);
+const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
+const gemini = new GeminiLive(config.gemini, ai);
+const memory = new Memory({ ai, persona: config.gemini.persona, ...config.memory });
+gemini.memory = memory;
 const speaker = new Speaker(overlay, config.voicevox);
-const director = new Director({ gemini, speaker, cfg: config.director });
+const director = new Director({ gemini, speaker, memory, cfg: config.director });
+
+// コンテキストが大きくなったら、場が空いたタイミングで要約して張り直す
+setInterval(() => {
+  const limit = config.memory.rotateAtTokens;
+  if (limit && gemini.ready && gemini.promptTokens > limit && director.quiet && Date.now() > gemini.nextRotateAt) {
+    gemini.rotate(`コンテキスト ${gemini.promptTokens} > ${limit}`);
+  }
+}, 2000);
 
 const mic = new Mic(config.mic);
 mic.on('chunk', (pcm) => {
@@ -48,7 +63,7 @@ obs.start();
 chat.start(config.youtube.videoId);
 
 // ---- コンソール操作 ----
-const HELP = `操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  v <動画ID>=チャット対象を変更  r=Gemini 再接続  q=終了`;
+const HELP = `操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  v <動画ID>=チャット対象を変更  r=要約して張り直す  m=今の記憶を表示  q=終了`;
 log.info(HELP);
 const rl = readline.createInterface({ input: process.stdin });
 rl.on('line', (line) => {
@@ -59,7 +74,8 @@ rl.on('line', (line) => {
     case 's': speaker.stop(); break;
     case 't': if (arg) gemini.sendText(arg); break;
     case 'v': chat.start(arg); break;
-    case 'r': gemini.reconnectNow(); break;
+    case 'r': gemini.rotate('手動'); break;
+    case 'm': log.info(`現在の記憶 (${gemini.promptTokens} tokens)\n${memory.instruction().slice(config.gemini.persona.length)}`); break;
     case 'q': shutdown(); break;
     default: log.info(HELP);
   }
