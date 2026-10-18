@@ -12,14 +12,16 @@ function wavSeconds(buf) {
 }
 
 export class Speaker extends EventEmitter {
-  constructor(overlay, vvCfg) {
+  constructor(overlay, vvCfg, { synthesize: synth = synthesize } = {}) {
     super();
     this.overlay = overlay;
     this.vvCfg = vvCfg;
+    this.synthesize = synth;
     this.queue = [];
     this.current = null; // { id, resolve }
     this.seq = 0;
     this.running = false;
+    this.gen = 0; // 再生ループの世代番号
     overlay.on('ended', (id) => {
       if (this.current?.id === id) this.current.resolve();
     });
@@ -32,16 +34,18 @@ export class Speaker extends EventEmitter {
   push(text) {
     text = text.trim();
     if (!text) return;
-    const item = { id: ++this.seq, text, wav: synthesize(text, this.vvCfg) };
+    const item = { id: ++this.seq, text, wav: this.synthesize(text, this.vvCfg) };
     item.wav.catch(() => {}); // 未処理 rejection 防止（エラーは再生時に拾う）
     this.queue.push(item);
-    if (!this.running) this.run();
+    if (!this.running) this.run(this.gen);
   }
 
-  async run() {
+  // 再生ループ。stop() で世代が進んだら、待ちから戻った時点で何もせずに抜ける
+  // （そうしないと、中断前に回された文を新しいループと並行して再生してしまう）
+  async run(gen) {
     this.running = true;
     this.emit('start');
-    while (this.queue.length) {
+    while (gen === this.gen && this.queue.length) {
       const item = this.queue.shift();
       let wav;
       try {
@@ -50,7 +54,7 @@ export class Speaker extends EventEmitter {
         log.error(`合成失敗「${item.text}」`, e.message);
         continue;
       }
-      if (!this.running) break; // stop() された
+      if (gen !== this.gen) return; // stop() された
       const sec = wavSeconds(wav);
       log.info(`🔊 ${item.text}`);
       if (!this.overlay.hasClient) log.warn('オーバーレイ未接続のため音が出ていません（OBS のブラウザソースを確認）');
@@ -62,6 +66,7 @@ export class Speaker extends EventEmitter {
       });
       this.current = null;
     }
+    if (gen !== this.gen) return;
     this.running = false;
     this.emit('idle');
   }
@@ -69,9 +74,13 @@ export class Speaker extends EventEmitter {
   stop() {
     if (!this.running && !this.queue.length) return;
     log.info('発話を中断');
+    this.gen++;
     this.queue = [];
     this.running = false;
     this.overlay.broadcast({ type: 'stop' });
-    this.current?.resolve();
+    const cur = this.current;
+    this.current = null;
+    cur?.resolve();
+    this.emit('idle');
   }
 }

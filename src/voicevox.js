@@ -3,12 +3,12 @@ import { logger } from './log.js';
 
 const log = logger('voicevox');
 
-export async function synthesize(text, { url, speaker, speedScale }) {
-  const q = await fetch(`${url}/audio_query?speaker=${speaker}&text=${encodeURIComponent(text)}`, { method: 'POST' });
+export async function synthesize(text, { url, speaker, speedScale }, fetchFn = fetch) {
+  const q = await fetchFn(`${url}/audio_query?speaker=${speaker}&text=${encodeURIComponent(text)}`, { method: 'POST' });
   if (!q.ok) throw new Error(`audio_query ${q.status}: ${await q.text()}`);
   const query = await q.json();
   query.speedScale = speedScale;
-  const s = await fetch(`${url}/synthesis?speaker=${speaker}`, {
+  const s = await fetchFn(`${url}/synthesis?speaker=${speaker}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(query),
@@ -17,9 +17,9 @@ export async function synthesize(text, { url, speaker, speedScale }) {
   return Buffer.from(await s.arrayBuffer());
 }
 
-export async function checkVoicevox(url) {
+export async function checkVoicevox(url, fetchFn = fetch) {
   try {
-    const r = await fetch(`${url}/version`);
+    const r = await fetchFn(`${url}/version`);
     log.info(`VOICEVOX ENGINE ${await r.text()} @ ${url}`);
     return true;
   } catch {
