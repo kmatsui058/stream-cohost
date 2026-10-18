@@ -54,6 +54,7 @@ export class Overlay extends EventEmitter {
     wss.on('connection', (ws) => {
       this.clients.add(ws);
       log.info(`オーバーレイ接続 (計 ${this.clients.size})`);
+      this.emit('connect');
       ws.on('message', (raw) => {
         try {
           const m = JSON.parse(raw);

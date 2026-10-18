@@ -145,6 +145,20 @@ describe('組み立てと操作', () => {
     });
   });
 
+  describe('turn-taking / 画面の接続状態の配線', () => {
+    it('画面が未接続なら音が届かないと判定し、つながると届くと判定して沈黙の起点を更新する', async () => {
+      await build();
+      const { port } = app.overlay.server.address();
+      expect(app.director.isAudible()).toBe(false);
+      app.director.lastActivity = 0;
+      const ws = new (await import('ws')).default(`ws://127.0.0.1:${port}`);
+      await new Promise((r) => ws.on('open', r));
+      await vi.waitFor(() => expect(app.director.isAudible()).toBe(true));
+      expect(Date.now() - app.director.lastActivity).toBeLessThan(1000);
+      ws.close();
+    });
+  });
+
   describe('live-chat → turn-taking の配線', () => {
     it('取得したチャットは進行役に渡る', async () => {
       await build();

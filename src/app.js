@@ -30,7 +30,8 @@ export function createApp(config, deps = {}) {
   const speaker = new Speaker(overlay, config.voicevox, {
     synthesize: deps.synthesize ?? ((text, cfg) => synthesize(text, cfg, fetchFn)),
   });
-  const director = new Director({ gemini, speaker, memory, cfg: config.director });
+  const director = new Director({ gemini, speaker, memory, cfg: config.director, isAudible: () => overlay.hasClient });
+  overlay.on('connect', () => director.markActivity());
   const mic = new Mic(config.mic, deps.spawn ? { spawn: deps.spawn } : {});
   const obs = new ObsCapture(config.obs, deps.obsClient ? { client: deps.obsClient } : {});
   const chat = new YouTubeChat(config.youtube, { fetch: fetchFn });
