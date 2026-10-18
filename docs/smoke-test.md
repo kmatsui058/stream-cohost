@@ -13,8 +13,8 @@
 | # | 操作 | 期待する結果 | 確認する仕様 |
 |---|---|---|---|
 | 1 | `npm start` | ログに `VOICEVOX ENGINE`、`接続完了`、`ffmpeg 起動`、`OBS に接続` が出る | operator-controls、live-session、audio-input、screen-capture |
-| 2 | OBS のブラウザソースを表示する | 立ち絵（なければ緑の丸）が出て、左上に `cohost: 未接続` が出ない | stream-overlay |
-| 3 | マイクに話しかける | 声で返事が来て、字幕が出て、口が動く | turn-taking、speech-output、stream-overlay |
+| 2 | OBS のブラウザソースを表示する | 左下に「SOUND ONLY」と表示名が暗い状態で出て、左上に `cohost: 未接続` が出ない。ブラウザソースをつなぐ前は、自発発話が起きない（ログに `控えます`） | stream-overlay、turn-taking |
+| 3 | マイクに話しかける | ナースロボ＿タイプＴの声で返事が来て、字幕が出て、SOUND ONLY 表示が明るくなる。話し終わると暗く戻る | turn-taking、speech-output、stream-overlay |
 | 4 | 画面について聞く（例：「今の画面どう？」） | 映っているものに触れた返事が来る | screen-capture |
 | 5 | 相方が喋っている途中で話しかける | 相方が黙る（ログに `発話を中断`） | turn-taking |
 | 6 | 30〜45 秒黙る | ログに `【合図】` の注入が出て、相方から話しかけてくる | turn-taking |

@@ -40,11 +40,13 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
     },
     voicevox: {
       url: env.VOICEVOX_URL || 'http://127.0.0.1:50021',
-      speaker: num('VOICEVOX_SPEAKER', 3), // 3 = ずんだもん ノーマル
+      speaker: num('VOICEVOX_SPEAKER', 47), // 47 = ナースロボ＿タイプＴ ノーマル
       speedScale: num('VOICEVOX_SPEED', 1.15),
     },
     overlay: {
       port: num('OVERLAY_PORT', 8787),
+      // 画面左下の SOUND ONLY 表示に出す相方の名前
+      displayName: env.COHOST_DISPLAY_NAME || 'ORÐA-VÁR',
     },
     director: {
       // 無音がこの秒数（min〜max でランダム）続いたら自発的に喋らせる。0 で無効

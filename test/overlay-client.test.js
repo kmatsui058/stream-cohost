@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createOverlayClient, rms, IMAGES, RECONNECT_MS } from '../public/overlay-core.js';
+import { createOverlayClient, rms, DIM, RECONNECT_MS } from '../public/overlay-core.js';
 import { fakeAudioContext, fakeSocketFactory, fakeElements } from './fakes/browser.js';
 
 const WAV = Buffer.from('RIFF....').toString('base64');
@@ -15,28 +15,67 @@ describe('stream-overlay（画面側）', () => {
     client = createOverlayClient({ audioContext: ctx, connect: sockets.connect, elements: el, schedule });
     client.start();
   });
+  const brightness = () => Number(el.panel.style.props['--brightness']);
+  const steps = (n) => {
+    for (let i = 0; i < n; i++) client.levelStep();
+  };
+
+  describe('SOUND ONLY 表示', () => {
+    it('起動直後: 暗い状態で、字幕は出ていない', () => {
+      client.levelStep();
+      expect(brightness()).toBeCloseTo(DIM);
+      expect(DIM).toBe(0.35);
+      expect(el.panel.classList.contains('speaking')).toBe(false);
+      expect(el.sub.classList.contains('show')).toBe(false);
+    });
+  });
+
+  describe('表示名を受け取る', () => {
+    it('画面が接続する: 受け取った表示名を出す', () => {
+      sockets.last().receive({ type: 'profile', name: 'ORÐA-VÁR' });
+      expect(el.name.textContent).toBe('ORÐA-VÁR');
+    });
+  });
 
   describe('画面での再生と表示', () => {
-    it('1 文を再生する: 再生中は字幕を出し、音量で口を開け、終わったら字幕を消して完了を通知する', async () => {
-      await sockets.last().receive({ type: 'say', id: 1, text: 'こんにちは。', wav: WAV });
+    it('1 文を再生する: 再生中は字幕を出し、終わったら字幕を消して完了を通知する', async () => {
+      await sockets.last().receive({ type: 'say', id: 1, text: '承知しました。', wav: WAV });
       const src = ctx.sources[0];
       expect(src.started).toBe(true);
-      expect(el.sub.textContent).toBe('こんにちは。');
+      expect(el.sub.textContent).toBe('承知しました。');
       expect(el.sub.classList.contains('show')).toBe(true);
-
-      ctx.level = 0.2;
-      client.lipStep();
-      expect(el.char.src).toBe(IMAGES.open);
-      expect(el.char.classList.contains('talk')).toBe(true);
-      ctx.level = 0.01;
-      client.lipStep();
-      expect(el.char.src).toBe(IMAGES.closed);
-
       src.onended();
       expect(el.sub.classList.contains('show')).toBe(false);
       expect(sockets.last().sent).toEqual([{ type: 'ended', id: 1 }]);
-      client.lipStep();
-      expect(el.char.src).toBe(IMAGES.closed);
+    });
+
+    it('再生音量に応じて明るくなる: 音量で明るくなり、無音になると暗い状態へゆっくり戻る', async () => {
+      await sockets.last().receive({ type: 'say', id: 1, text: '一', wav: WAV });
+      ctx.level = 0.3; // 十分大きい音
+      steps(10);
+      expect(brightness()).toBeGreaterThan(0.95);
+      expect(el.panel.classList.contains('speaking')).toBe(true);
+      // 中くらいの音量なら中くらいの明るさ
+      ctx.level = 0.075;
+      steps(60);
+      expect(brightness()).toBeGreaterThan(0.6);
+      expect(brightness()).toBeLessThan(0.75);
+      // 無音: 1 フレームでは戻らず、ゆっくり暗くなる
+      ctx.level = 0;
+      client.levelStep();
+      expect(brightness()).toBeGreaterThan(0.6);
+      steps(120);
+      expect(brightness()).toBeCloseTo(DIM, 2);
+      expect(el.panel.classList.contains('speaking')).toBe(false);
+    });
+
+    it('再生が終わったら、音量に関係なく暗い状態へ戻る', async () => {
+      await sockets.last().receive({ type: 'say', id: 1, text: '一', wav: WAV });
+      ctx.level = 0.3;
+      steps(10);
+      ctx.sources[0].onended();
+      steps(120);
+      expect(brightness()).toBeCloseTo(DIM, 2);
     });
 
     it('次の指示が来たら、再生中の音声を止めてから新しい音声を再生する', async () => {
@@ -45,7 +84,6 @@ describe('stream-overlay（画面側）', () => {
       expect(ctx.sources[0].stopped).toBe(true);
       expect(ctx.sources[1].started).toBe(true);
       expect(el.sub.textContent).toBe('二');
-      // 止めた方の終了イベントは完了として扱わない
       ctx.sources[0].onended?.();
       expect(sockets.last().sent).toEqual([]);
     });
@@ -79,21 +117,6 @@ describe('stream-overlay（画面側）', () => {
     it('rms: 音量の実効値を計算する', () => {
       expect(rms(new Float32Array([0.5, -0.5, 0.5, -0.5]))).toBeCloseTo(0.5);
       expect(rms(new Float32Array([0, 0]))).toBe(0);
-    });
-  });
-
-  describe('立ち絵がないときの仮表示', () => {
-    it('立ち絵を置いていない: 仮の図形を出し、その口を音量で開閉する', async () => {
-      el.char.onerror();
-      expect(el.char.style.display).toBe('none');
-      expect(el.placeholder.style.display).toBe('block');
-      await sockets.last().receive({ type: 'say', id: 1, text: '一', wav: WAV });
-      ctx.level = 0.2;
-      client.lipStep();
-      expect(el.placeholder.style.props['--mouth']).toBe('40px');
-      ctx.level = 0;
-      client.lipStep();
-      expect(el.placeholder.style.props['--mouth']).toBe('6px');
     });
   });
 

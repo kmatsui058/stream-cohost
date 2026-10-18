@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/kmatsui058/stream-cohost/actions/workflows/ci.yml/badge.svg)](https://github.com/kmatsui058/stream-cohost/actions/workflows/ci.yml)
 
-配信者のマイク音声と OBS の配信画面を Gemini Live API にリアルタイムで送り、返ってきた発言を VOICEVOX で読み上げ、OBS のブラウザソースで立ち絵（口パク）と字幕を出す。YouTube のライブチャットも読む。
+配信者のマイク音声と OBS の配信画面を Gemini Live API にリアルタイムで送り、返ってきた発言を VOICEVOX で読み上げ、OBS のブラウザソースで「SOUND ONLY」表示（喋るのに合わせて明るくなる）と字幕を出す。相方は配信者の人工精霊「オルダ・ヴァール」（声：VOICEVOX ナースロボ＿タイプＴ）。YouTube のライブチャットも読む。
 
 ---
 
@@ -27,7 +27,7 @@
  │                                                       ▼ WebSocket (:8787)          │
  │                       OBS ブラウザソース  public/overlay.html                       │
  │                         ・WAV を再生（→ OBS の音声ミキサーへ）                        │
- │                         ・音量で口パク、字幕表示                                     │
+ │                         ・音量で SOUND ONLY 表示が明るくなる、字幕表示                 │
  │                         ・再生終了を {type:'ended'} でサーバーへ返す                  │
  └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -42,7 +42,7 @@
 | **Gemini の音声出力は捨てて、文字起こしだけ使う** | 現行の Live モデルはテキストだけで返す設定（`TEXT` モダリティ）に対応しておらず、音声でしか返せない。声を VOICEVOX にしたいので、`outputAudioTranscription` で届く文字起こしを使って読み上げている。生成された音声は課金されるが使わない。 |
 | 画面は obs-websocket のスクリーンショット | 配信に出ている画面（プログラムシーン）を、そのまま「視聴者と同じもの」として渡せる。仮想カメラや画面キャプチャを別に用意しなくていい。 |
 | マイクは ffmpeg | Node からマイクを読むネイティブモジュールはビルドが面倒。ffmpeg に生 PCM を出させて stdout で受けるのが一番トラブルが少ない。 |
-| 再生は OBS のブラウザソース | 音を OBS のミキサーに直接入れられるので、仮想オーディオケーブルが要らない。立ち絵と字幕も同じページで出せる。 |
+| 再生は OBS のブラウザソース | 音を OBS のミキサーに直接入れられるので、仮想オーディオケーブルが要らない。表示と字幕も同じページで出せる。 |
 
 ---
 
@@ -60,9 +60,10 @@
 | [src/director.js](src/director.js) | 進行役。文への区切り、割り込み時の停止、沈黙時の自発発話、チャットの注入タイミング | 喋るタイミングがおかしい |
 | [src/speaker.js](src/speaker.js) | 発話キュー。VOICEVOX で合成してオーバーレイへ送り、再生完了を待って次へ | 文字起こしはログに出るのに音が出ない |
 | [src/voicevox.js](src/voicevox.js) | VOICEVOX ENGINE の `audio_query` → `synthesis` | 同上（「合成失敗」がログに出る） |
-| [src/overlay.js](src/overlay.js) | `:8787` で HTML 配信と WebSocket | 音も立ち絵も出ない |
+| [src/overlay.js](src/overlay.js) | `:8787` で HTML 配信と WebSocket。画面が接続したら表示名を送る | 音も表示も出ない |
 | [public/overlay.html](public/overlay.html) | ブラウザソース本体。ブラウザの部品を渡して overlay-core.js を起動するだけ | 同上 |
-| [public/overlay-core.js](public/overlay-core.js) | 画面側のロジック。再生・口パク・字幕・再生完了の通知・再接続 | 同上 |
+| [public/overlay-core.js](public/overlay-core.js) | 画面側のロジック。再生・音量に応じた明るさ・字幕・表示名・再生完了の通知・再接続 | 同上 |
+| [public/overlay.css](public/overlay.css) | 画面左下の SOUND ONLY 表示と字幕の見た目。位置や大きさはここで調整する | — |
 | [src/youtube.js](src/youtube.js) | ライブチャットのポーリング | チャットに反応しない（それ以外は動く） |
 | [persona.md](persona.md) | 相方のキャラ・話し方・禁止事項（システムプロンプト）。**ここを編集すれば性格が変わる**（再起動が必要） | — |
 | `logs/YYYY-MM-DD.log` | 全ログ。コンソールと同じ内容 + `LOG_DEBUG=1` で詳細 | — |
@@ -126,9 +127,11 @@
    - URL `http://127.0.0.1:8787/`、幅 1920、高さ 1080
    - ✅「OBS で音声を制御する」にチェック → 音声ミキサーに出てくるので、その「オーディオの詳細プロパティ」で、モニタリングを「モニターと出力」にする（自分のヘッドホンでも聞こえるように）
    - カスタム CSS は空にする（ページ側で背景を透明にしている）
-5. **立ち絵**：`public/char/closed.png`（口を閉じた絵）と `public/char/open.png`（口を開けた絵）を置く。無ければ緑の丸が仮表示される。位置やサイズは overlay.html の `#char` の CSS で調整する。
+5. **表示**：立ち絵は使わず、画面左下に「SOUND ONLY」と表示名（`COHOST_DISPLAY_NAME`、既定 `ORÐA-VÁR`）を出す。喋っていない間は暗く（明るさ 35%）、再生音量に合わせて明るくなる。位置や大きさは `public/overlay.css` で調整する。
+   - ナースロボ＿タイプＴの公式立ち絵は、規約で「他のキャラクターとして扱うこと」と二次配布が禁止されているため使っていない。
 6. **（任意）YouTube チャット**：Google Cloud Console で YouTube Data API v3 を有効にし、API キーを `YOUTUBE_API_KEY` に入れる。動画 ID は配信ごとに変わるので、`.env` に書くか、起動後に `v <動画ID>` で指定する。
-7. **声の変更**：`npm run speakers` で ID の一覧が出る。`VOICEVOX_SPEAKER` に指定する。配信の概要欄に「VOICEVOX:キャラ名」とクレジットを書く（各キャラの利用規約に従う）。
+7. **声**：既定はナースロボ＿タイプＴ ノーマル（ID 47）。配信の概要欄に「VOICEVOX:ナースロボ＿タイプＴ」とクレジットを書く。声を変えるときは、`npm run speakers` で ID の一覧を出して `VOICEVOX_SPEAKER` に指定する（各キャラの利用規約に従う）。
+8. **キャラクター**：相方の設定と話し方は `persona.md`。変更したら再起動する。
 
 ### 4.4 起動
 

@@ -14,8 +14,8 @@ describe('operator-controls / 設定の既定値', () => {
     expect(c.memory).toEqual({ model: 'gemini-3.5-flash-lite', maxChars: 1500, recentEntries: 12, rotateAtTokens: 24000 });
     expect(c.mic.ffmpeg).toBe('ffmpeg');
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
-    expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 3, speedScale: 1.15 });
-    expect(c.overlay.port).toBe(8787);
+    expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
+    expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR' });
     expect(c.director).toEqual({ idleMinSec: 25, idleMaxSec: 45, bargeIn: true, gateMicWhileSpeaking: false });
     expect(c.youtube.pollMinMs).toBe(10000);
   });
@@ -29,8 +29,17 @@ describe('operator-controls / 設定の既定値', () => {
   it('数値と文字列の上書きが反映され、空文字は未指定として扱う', () => {
     const c = loadConfig({ IDLE_MIN_SEC: '0', VOICEVOX_SPEAKER: '', PERSONA_FILE: 'x.md' }, readPersona);
     expect(c.director.idleMinSec).toBe(0);
-    expect(c.voicevox.speaker).toBe(3);
+    expect(c.voicevox.speaker).toBe(47);
     expect(c.gemini.persona).toBe('persona from x.md');
+  });
+});
+
+describe('operator-controls / 設定の既定値（声と表示名）', () => {
+  it('声と表示名の既定値: ナースロボ＿タイプＴ ノーマル（47）と ORÐA-VÁR', () => {
+    const c = loadConfig({}, readPersona);
+    expect(c.voicevox.speaker).toBe(47);
+    expect(c.overlay.displayName).toBe('ORÐA-VÁR');
+    expect(loadConfig({ COHOST_DISPLAY_NAME: 'ORDA' }, readPersona).overlay.displayName).toBe('ORDA');
   });
 });
 

@@ -3,27 +3,16 @@
 <head>
 <meta charset="utf-8">
 <title>cohost overlay</title>
-<style>
-  /* OBS ブラウザソース用。背景は透明。サイズはソース側で 1920x1080 を想定 */
-  html, body { margin: 0; background: transparent; overflow: hidden; font-family: "BIZ UDPGothic", "Yu Gothic UI", sans-serif; }
-  #char { position: absolute; right: 40px; bottom: 0; height: 520px; transition: transform .08s; }
-  #char.talk { transform: translateY(-4px); }
-  /* 立ち絵 PNG が無いときの仮表示 */
-  #placeholder { position: absolute; right: 80px; bottom: 60px; width: 220px; height: 220px; border-radius: 50%;
-    background: #8fd16a; display: none; }
-  #placeholder::after { content: ""; position: absolute; left: 70px; top: 140px; width: 80px; height: var(--mouth, 6px);
-    background: #2b2b2b; border-radius: 40px; transition: height .05s; }
-  #sub { position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); max-width: 1200px;
-    padding: 14px 28px; border-radius: 14px; background: rgba(0,0,0,.65); color: #fff; font-size: 40px;
-    line-height: 1.4; text-align: center; opacity: 0; transition: opacity .2s; }
-  #sub.show { opacity: 1; }
-  #status { position: absolute; left: 8px; top: 8px; color: #f55; font-size: 14px; }
-</style>
+<link rel="stylesheet" href="/overlay.css">
 </head>
 <body>
-<img id="char" alt="">
-<div id="placeholder"></div>
-<div id="sub"></div>
+<div id="cohost">
+  <div id="panel">
+    <div class="label">SOUND ONLY</div>
+    <div class="name" id="name"></div>
+  </div>
+  <div id="sub"></div>
+</div>
 <div id="status"></div>
 <script type="module">
   // ロジックは overlay-core.js（テスト対象）。ここはブラウザの部品を渡して起動するだけ
@@ -33,15 +22,15 @@
     audioContext: new AudioContext(),
     connect: () => new WebSocket(`ws://${location.host}`),
     elements: {
-      char: document.getElementById('char'),
-      placeholder: document.getElementById('placeholder'),
+      panel: document.getElementById('panel'),
+      name: document.getElementById('name'),
       sub: document.getElementById('sub'),
       status: document.getElementById('status'),
     },
   });
   client.start();
   (function loop() {
-    client.lipStep();
+    client.levelStep();
     requestAnimationFrame(loop);
   })();
 </script>

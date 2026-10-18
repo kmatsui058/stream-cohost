@@ -15,9 +15,10 @@ const PUBLIC = path.resolve('public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.js': 'text/javascript', '.css': 'text/css' };
 
 export class Overlay extends EventEmitter {
-  constructor({ port }) {
+  constructor({ port, displayName = '' }) {
     super();
     this.port = port;
+    this.displayName = displayName;
     this.clients = new Set();
   }
 
@@ -54,6 +55,7 @@ export class Overlay extends EventEmitter {
     wss.on('connection', (ws) => {
       this.clients.add(ws);
       log.info(`オーバーレイ接続 (計 ${this.clients.size})`);
+      ws.send(JSON.stringify({ type: 'profile', name: this.displayName }));
       this.emit('connect');
       ws.on('message', (raw) => {
         try {

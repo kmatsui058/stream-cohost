@@ -103,8 +103,18 @@ describe('stream-overlay（サーバー側）', () => {
       expect(overlay.hasClient).toBe(true);
       overlay.broadcast({ type: 'say', id: 1, text: 'やあ', wav: 'AA==' });
       overlay.broadcast({ type: 'stop' });
-      await until(() => sockets.every((s) => s.received.length === 2));
-      for (const s of sockets) expect(s.received).toEqual([{ type: 'say', id: 1, text: 'やあ', wav: 'AA==' }, { type: 'stop' }]);
+      const cmds = (s) => s.received.filter((m) => m.type !== 'profile');
+      await until(() => sockets.every((s) => cmds(s).length === 2));
+      for (const s of sockets) expect(cmds(s)).toEqual([{ type: 'say', id: 1, text: 'やあ', wav: 'AA==' }, { type: 'stop' }]);
+    });
+
+    it('表示名を受け取る / 画面が接続する: 設定された表示名を送る', async () => {
+      overlay = new Overlay({ port: 0, displayName: 'ORÐA-VÁR' });
+      const port = await overlay.start();
+      const ws = await open(port);
+      sockets.push(ws);
+      await until(() => ws.received.length === 1);
+      expect(ws.received[0]).toEqual({ type: 'profile', name: 'ORÐA-VÁR' });
     });
 
     it('画面が新しく接続するたびに connect を 1 回出す', async () => {
