@@ -61,12 +61,12 @@
 
 ## 12. CI
 
-- [ ] 12.1 `.github/workflows/ci.yml` を作る（windows-latest と ubuntu-latest、Node 22、`npm ci` → `openspec validate --all --strict` → `vitest run --coverage`、`OPENSPEC_TELEMETRY=0`）。確認：GitHub の private リポジトリに push し、両方の OS でワークフローが成功する
-- [ ] 12.2 README に CI のバッジと、テストの実行方法を書く。確認：README に書いたコマンドが、そのとおりに動く
+- [x] 12.1 `.github/workflows/ci.yml` を作る（windows-latest と ubuntu-latest、Node 22、`npm ci` → `openspec validate --all --strict` → `vitest run --coverage`、`OPENSPEC_TELEMETRY=0`）。確認：GitHub の private リポジトリに push し、両方の OS でワークフローが成功する
+- [x] 12.2 README に CI のバッジと、テストの実行方法を書く。確認：README に書いたコマンドが、そのとおりに動く
 
 ## 13. 手動スモークテスト
 
-- [ ] 13.1 `docs/smoke-test.md` に、実機・実 API での確認手順を書く（VOICEVOX、OBS への接続とブラウザソース、マイク、Gemini との往復、`r` での張り直し、チャット）。確認：手順を上から実行できる
+- [x] 13.1 `docs/smoke-test.md` に、実機・実 API での確認手順を書く（VOICEVOX、OBS への接続とブラウザソース、マイク、Gemini との往復、`r` での張り直し、チャット）。確認：手順を上から実行できる
 - [ ] 13.2 Gemini API キーなどを正規に設定してから、配信者と一緒にスモークテストを実施し、結果を記録する。確認：全項目が成功するか、失敗した項目が新しい変更として起票されている
 
 ## Workflow follow-up
