@@ -5,8 +5,6 @@
     "start": "node --env-file=.env src/main.js",
     "mics": "ffmpeg -hide_banner -list_devices true -f dshow -i dummy",
     "speakers": "node -e \"fetch('http://127.0.0.1:50021/speakers').then(r=>r.json()).then(s=>s.forEach(x=>x.styles.forEach(y=>console.log(y.id, x.name, y.name))))\"",
-    "test:voice": "node --env-file-if-exists=.env scripts/test-voice.js",
-    "test:memory": "node scripts/test-memory.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
