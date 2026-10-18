@@ -54,12 +54,14 @@ const variants = experiment.variants.map((v) => ({
 }));
 
 // 1 回の入力に対する相方の返事（出力の文字起こし）と、返事が終わるまでの時間を受け取る
-async function ask(v, text) {
+async function ask(v, text, context) {
   let session;
   let out = '';
   let t0;
   let firstMs = null;
-  const liveConfig = { responseModalities: [Modality.AUDIO], systemInstruction: v.instruction, outputAudioTranscription: {} };
+  // ケースに直前のやり取りがあれば、本番と同じ形（「話者: 発言」）で指示に入れる
+  const systemInstruction = v.instruction + (context?.length ? `\n\n# 直前のやり取り\n${context.join('\n')}` : '');
+  const liveConfig = { responseModalities: [Modality.AUDIO], systemInstruction, outputAudioTranscription: {} };
   if (v.thinkingLevel) liveConfig.thinkingConfig = { thinkingLevel: v.thinkingLevel };
   if (v.tools?.length) liveConfig.tools = v.tools.map((name) => ({ [name]: {} }));
   // ツールを使った痕跡（検索の根拠情報、ツール呼び出し、コード実行）を記録する
@@ -117,7 +119,7 @@ await Promise.all(
     while (next < jobs.length) {
       const { c, ci, v, vi } = jobs[next++];
       try {
-        replies[ci][vi] = await ask(v, inputOf(c));
+        replies[ci][vi] = await ask(v, inputOf(c), c.context);
       } catch (e) {
         replies[ci][vi] = { text: '', ms: null, firstMs: null, signals: [], error: e.message };
         console.error(`\n失敗: ${c.id} / ${v.name}: ${e.message}`);
@@ -156,7 +158,8 @@ md += `| **正解（黙る／話す）と一致** | ${sums.map((s) => `**${s.exp
 for (const c of CHECKS) md += `| ${c.label} | ${sums.map((s) => s[c.key]).join(' | ')} |\n`;
 md += `\n## ケースごとの返事\n\n| ケース | 入力 | ${variants.map((v) => v.name).join(' | ')} |\n|---|---|${variants.map(() => '---').join('|')}|\n`;
 cases.forEach((c, i) => {
-  const input = (c.type === 'idle' ? `（沈黙時の合図: 切り口 ${c.topic}）` : c.text) + `<br>正解: ${c.expect === 'silent' ? '黙る' : c.expect === 'speak' ? '話す' : 'どちらでも'}`;
+  const ctx = c.context?.length ? `（直前: ${c.context.join(' ／ ')}）<br>` : '';
+  const input = ctx + (c.type === 'idle' ? `（沈黙時の合図: 切り口 ${c.topic}）` : c.text) + `<br>正解: ${c.expect === 'silent' ? '黙る' : c.expect === 'speak' ? '話す' : 'どちらでも'}`;
   const mark = (ok) => (ok === null ? '' : ok ? '✓ ' : '✗ ');
   const cells = replies[i].map((r, vi) => `${mark(checked[i][vi].expectOk)}${esc(r.text)}<br>⚑ ${flags(checked[i][vi])}（最初の文字 ${sec(r.firstMs)}）${r.signals.length ? `<br>🔎 ${r.signals.join(', ')}` : ''}${r.error ? `<br>失敗: ${r.error}` : ''}`);
   md += `| **${c.id}**<br>${c.note} | ${esc(input)} | ${cells.join(' | ')} |\n`;

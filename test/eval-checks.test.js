@@ -9,10 +9,11 @@ describe('prompt-eval / 返事をルールでチェックする', () => {
     expect(r.question).toBe(true);
   });
 
-  it('誤った呼び方: 「小波さん」を記録する。「オコハ」は誤りにしない', () => {
+  it('誤った呼び方: 名前で呼んだら記録する。「マスター」は誤りにしない', () => {
     expect(checkReply('小波さんはどう思いますか。').wrongName).toBe(true);
     expect(checkReply('夕暮れ小波さん、失礼しました。').wrongName).toBe(true);
-    expect(checkReply('オコハは、どう考えますか。').wrongName).toBe(false);
+    expect(checkReply('オコハは、どう考えますか。').wrongName).toBe(true);
+    expect(checkReply('マスター、それは囲碁の用語です。').wrongName).toBe(false);
   });
 
   it('長さ・「ですね」・共感の定型句・自己言及を記録する', () => {
