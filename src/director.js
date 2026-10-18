@@ -26,6 +26,9 @@ export const IDLE_CLOSING =
   '観察したこと、そこから立てた仮説、理解するための具体的な問いのどれかで締めて、配信者や視聴者が答えたくなる形にしてください。' +
   '直前の発言とは違う角度から、新しい言い回しで話してください。';
 const SENTENCE_END = /[^。！？!?♪\n]*[。！？!?♪\n]+/g;
+// 黙ると判断したときに AI が返す合図の言葉。これだけの発言は読み上げない
+export const SILENT_MARKER = 'スルー';
+export const isSilentReply = (text) => text.replace(/[\s。、．.!！?？…]/g, '') === SILENT_MARKER;
 const now = () => Date.now();
 
 export class Director {
@@ -83,14 +86,23 @@ export class Director {
     this.buf += t;
     let consumed = 0;
     for (const m of this.buf.matchAll(SENTENCE_END)) {
-      this.speaker.push(m[0]);
+      this.say(m[0]);
       consumed = m.index + m[0].length;
     }
     this.buf = this.buf.slice(consumed);
   }
 
+  // 読み上げに回す。黙る合図だけの文は捨てて記録する
+  say(sentence) {
+    if (isSilentReply(sentence)) {
+      log.info('（黙ると判断）');
+      return;
+    }
+    this.speaker.push(sentence);
+  }
+
   onTurnComplete() {
-    if (!this.paused && this.buf.trim()) this.speaker.push(this.buf);
+    if (!this.paused && this.buf.trim()) this.say(this.buf);
     this.buf = '';
     this.modelBusy = false;
     this.awaitingSince = 0;
@@ -105,7 +117,7 @@ export class Director {
 
   // セッションを張り直した直後。生成途中で切り替わった場合 turnComplete が来ないので状態を戻す
   onSessionOpen() {
-    if (!this.paused && this.buf.trim()) this.speaker.push(this.buf);
+    if (!this.paused && this.buf.trim()) this.say(this.buf);
     this.buf = '';
     this.modelBusy = false;
     this.awaitingSince = 0;

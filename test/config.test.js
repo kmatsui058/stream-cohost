@@ -16,7 +16,8 @@ describe('operator-controls / 設定の既定値', () => {
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
     expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
     expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR', characterDir: '' });
-    expect(c.director).toEqual({ idleMinSec: 25, idleMaxSec: 45, bargeIn: true, gateMicWhileSpeaking: false });
+    // 沈黙時に話しかける機能は既定で無効（話を広げるのは配信者が主導する）
+    expect(c.director).toEqual({ idleMinSec: 0, idleMaxSec: 45, bargeIn: true, gateMicWhileSpeaking: false });
     expect(c.youtube.pollMinMs).toBe(10000);
   });
 
