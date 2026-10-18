@@ -4,7 +4,8 @@ import { YouTubeChat } from '../src/youtube.js';
 import { logFilePath } from '../src/log.js';
 
 const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
-const video = (chatId = 'chat-1') => json({ items: [{ liveStreamingDetails: { activeLiveChatId: chatId } }] });
+const video = (chatId = 'chat-1') =>
+  json({ items: [{ snippet: { title: `配信 ${chatId}`, description: `概要 ${chatId}` }, liveStreamingDetails: { activeLiveChatId: chatId } }] });
 const msg = (type, name, text) => ({ snippet: { type, displayMessage: text }, authorDetails: { displayName: name } });
 const page = (items, next = 'p', interval = 2000) => json({ items, nextPageToken: next, pollingIntervalMillis: interval });
 
@@ -53,7 +54,7 @@ describe('live-chat', () => {
     });
 
     it('配信中ではない動画: エラーを記録して取得を始めない', async () => {
-      f.mockImplementationOnce(async () => json({ items: [{ liveStreamingDetails: {} }] }));
+      f.mockImplementationOnce(async () => json({ items: [{ snippet: { title: '終わった配信', description: 'd' }, liveStreamingDetails: {} }] }));
       await make().start('v1');
       await vi.advanceTimersByTimeAsync(60000);
       expect(f).toHaveBeenCalledTimes(1);
@@ -63,12 +64,32 @@ describe('live-chat', () => {
     it('動画 ID から activeLiveChatId を引き、API キーつきで取得する', async () => {
       await make().start('v1');
       const [videosUrl] = f.mock.calls[0];
-      expect(videosUrl).toContain('/videos?part=liveStreamingDetails&id=v1&key=KEY');
+      expect(videosUrl).toContain('/videos?part=snippet,liveStreamingDetails&id=v1&key=KEY');
       const [chatUrl] = f.mock.calls[1];
       const u = new URL(chatUrl);
       expect(u.searchParams.get('liveChatId')).toBe('chat-v1');
       expect(u.searchParams.get('part')).toBe('snippet,authorDetails');
       expect(u.searchParams.get('key')).toBe('KEY');
+    });
+  });
+
+  describe('stream-info / 配信のタイトルと概要欄を取得する', () => {
+    it('配信を指定する: 1 回の問い合わせでタイトルと概要欄を知らせる', async () => {
+      const infos = [];
+      make().on('info', (i) => infos.push(i));
+      await chat.start('v1');
+      expect(infos).toEqual([{ videoId: 'v1', title: '配信 chat-v1', description: '概要 chat-v1' }]);
+      expect(f.mock.calls.filter(([u]) => u.includes('/videos?'))).toHaveLength(1);
+    });
+
+    it('ライブチャットのない動画: タイトルと概要欄は知らせ、チャットは始めない', async () => {
+      f.mockImplementationOnce(async () => json({ items: [{ snippet: { title: '終わった配信', description: 'd' }, liveStreamingDetails: {} }] }));
+      const infos = [];
+      make().on('info', (i) => infos.push(i));
+      await chat.start('v9');
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(infos).toEqual([{ videoId: 'v9', title: '終わった配信', description: 'd' }]);
+      expect(f).toHaveBeenCalledTimes(1);
     });
   });
 

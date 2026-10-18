@@ -10,6 +10,7 @@ import { logger } from './log.js';
 
 const log = logger('memory');
 const FINALIZE_TIMEOUT_MS = 8000;
+const STREAM_DESCRIPTION_MAX = 1000;
 
 export class Memory {
   constructor({
@@ -25,6 +26,7 @@ export class Memory {
     this.summaryFile = summaryFile;
     this.stateFile = stateFile;
     this.previous = ''; // 前回の配信から引き継いだ記憶（指示に入れるだけで、今回の要約には混ぜない）
+    this.streamInfo = ''; // 今日の配信のタイトルと概要欄
     this.summary = '';
     this.entries = []; // { role: '配信者' | '相方' | 'チャット', text, sealed? }
     this.summarizing = null;
@@ -135,9 +137,20 @@ ${this.format(old)}`;
     }
   }
 
+  // 今日の配信のタイトルと概要欄を設定する。内容が変わったら true
+  setStreamInfo({ title = '', description = '' }) {
+    const text = `タイトル: ${title}\n概要欄:\n${description.slice(0, STREAM_DESCRIPTION_MAX)}`;
+    if (text === this.streamInfo) return false;
+    this.streamInfo = text;
+    log.info(`今日の配信の情報を設定: ${title}`);
+    return true;
+  }
+
   // 新しいセッションに渡すシステムプロンプト
   instruction() {
-    const prev = this.previous ? `\n\n# 前回の配信の要約\n${this.previous}` : '';
+    const prev =
+      (this.streamInfo ? `\n\n# 今日の配信\n${this.streamInfo}` : '') +
+      (this.previous ? `\n\n# 前回の配信の要約\n${this.previous}` : '');
     if (!this.summary && !this.entries.length) return this.persona + prev;
     return `${this.persona}${prev}
 

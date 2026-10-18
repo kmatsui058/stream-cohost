@@ -50,6 +50,10 @@ export function createApp(config, deps = {}) {
     if (!director.paused) gemini.sendFrame(jpeg);
   });
   chat.on('messages', (msgs) => director.addChat(msgs));
+  // 配信のタイトルと概要欄をコンテキストに載せる。セッション中に変わったら張り直して反映する
+  chat.on('info', (info) => {
+    if (memory.setStreamInfo(info) && gemini.ready) gemini.rotate('配信の情報を反映');
+  });
 
   // コンテキストが大きくなったら、場が空いたタイミングで要約して張り直す
   function checkRotate() {
