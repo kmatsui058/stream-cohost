@@ -30,11 +30,14 @@ export class YouTubeChat extends EventEmitter {
       return;
     }
     try {
-      const r = await this.fetch(`${API}/videos?part=liveStreamingDetails&id=${videoId}&key=${this.apiKey}`);
+      const r = await this.fetch(`${API}/videos?part=snippet,liveStreamingDetails&id=${videoId}&key=${this.apiKey}`);
       const j = await r.json();
       if (gen !== this.gen) return; // 待っている間にまた切り替えられた
       if (!r.ok) throw new Error(JSON.stringify(j.error?.message ?? j));
-      const chatId = j.items?.[0]?.liveStreamingDetails?.activeLiveChatId;
+      const item = j.items?.[0];
+      // 配信のタイトルと概要欄は、チャットの有無にかかわらず知らせる（相方のコンテキストに載せる）
+      if (item?.snippet) this.emit('info', { videoId, title: item.snippet.title ?? '', description: item.snippet.description ?? '' });
+      const chatId = item?.liveStreamingDetails?.activeLiveChatId;
       if (!chatId) throw new Error('activeLiveChatId が見つかりません（配信中の動画 ID か確認）');
       log.info(`チャット取得開始 video=${videoId}`);
       this.chatId = chatId;

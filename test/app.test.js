@@ -193,6 +193,25 @@ describe('組み立てと操作', () => {
     });
   });
 
+  describe('stream-info / 配信の情報が変わったら張り直す', () => {
+    it('起動後に v で配信を指定する: 張り直して、新しい指示に配信の情報が入る', async () => {
+      await build();
+      const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
+      app.chat.emit('info', { videoId: 'v1', title: '【RO】EP追想#5', description: '概要' });
+      expect(rotate).toHaveBeenCalledTimes(1);
+      expect(app.memory.instruction()).toContain('タイトル: 【RO】EP追想#5');
+    });
+
+    it('同じ配信をもう一度指定する: 張り直さない', async () => {
+      await build();
+      const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
+      const info = { videoId: 'v1', title: 't', description: 'd' };
+      app.chat.emit('info', info);
+      app.chat.emit('info', { ...info });
+      expect(rotate).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('live-chat → turn-taking の配線', () => {
     it('取得したチャットは進行役に渡る', async () => {
       await build();

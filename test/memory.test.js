@@ -248,6 +248,32 @@ describe('conversation-memory', () => {
     });
   });
 
+  describe('stream-info / 配信の情報を指示に入れる', () => {
+    it('タイトルと概要欄がある: ペルソナの後ろに「今日の配信」として入れる', () => {
+      const mem = make(fakeAi());
+      expect(mem.setStreamInfo({ title: '【RO】EP追想#5', description: '今日は転生します' })).toBe(true);
+      const inst = mem.instruction();
+      expect(inst.indexOf('PERSONA')).toBe(0);
+      expect(inst).toMatch(/# 今日の配信\nタイトル: 【RO】EP追想#5\n概要欄:\n今日は転生します/);
+    });
+
+    it('概要欄が長い: 先頭の 1,000 文字までを入れる', () => {
+      const mem = make(fakeAi());
+      mem.setStreamInfo({ title: 't', description: 'あ'.repeat(1000) + 'い'.repeat(2000) });
+      const inst = mem.instruction();
+      expect(inst).toContain('あ'.repeat(1000));
+      expect(inst).not.toContain('い');
+    });
+
+    it('配信の情報がなければ入れない。同じ情報をもう一度渡すと「変化なし」を返す', () => {
+      const mem = make(fakeAi());
+      expect(mem.instruction()).toBe('PERSONA');
+      mem.setStreamInfo({ title: 't', description: 'd' });
+      expect(mem.setStreamInfo({ title: 't', description: 'd' })).toBe(false);
+      expect(mem.setStreamInfo({ title: 't2', description: 'd' })).toBe(true);
+    });
+  });
+
   describe('要約を確認できるようにする', () => {
     it('要約が更新された: ファイルを最新の内容と時刻で上書きし、ログにも記録する', async () => {
       const mem = make(fakeAi('一回目'), 0);
