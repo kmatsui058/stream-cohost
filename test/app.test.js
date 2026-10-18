@@ -13,20 +13,24 @@ import { silentWav } from './fakes/wav.js';
 const env = { GEMINI_API_KEY: 'k', MIC_DEVICE: 'mic', OVERLAY_PORT: '0' };
 
 describe('組み立てと操作', () => {
-  let app, live, sp, onQuit;
-  const build = async (extraEnv = {}) => {
+  let app, live, sp, onQuit, tmp;
+  const build = async (extraEnv = {}, { previousState, carryOver } = {}) => {
     live = fakeLiveAi();
     live.ai.models = { generateContent: vi.fn(async () => ({ text: '要約' })) };
     sp = fakeSpawner();
     onQuit = vi.fn();
     const config = loadConfig({ ...env, ...extraEnv }, () => 'PERSONA');
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-app-'));
+    if (previousState) fs.writeFileSync(path.join(tmp, 'carryover.json'), previousState);
     app = createApp(config, {
       ai: live.ai,
       spawn: sp.spawn,
       obsClient: fakeObs(),
       fetch: vi.fn(async () => ({ ok: true, text: async () => '"0.25.2"' })),
       synthesize: async () => silentWav(1),
-      summaryFile: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-app-')), 'summary.txt'),
+      summaryFile: path.join(tmp, 'summary.txt'),
+      stateFile: path.join(tmp, 'carryover.json'),
+      carryOver,
       onQuit,
     });
     await app.start();
@@ -94,6 +98,36 @@ describe('組み立てと操作', () => {
       await build();
       app.handleCommand('x');
       expect((await readLog()).split(HELP).length).toBeGreaterThanOrEqual(3); // 起動時 + x
+    });
+  });
+
+  describe('conversation-memory / 前回の記憶の引き継ぎ', () => {
+    const previous = JSON.stringify({ savedAt: '2026-10-17T13:00:00.000Z', summary: '- 前回は転生クエスト', recent: [] });
+
+    it('前回の記憶がある: 最初のセッションへの指示に前回の要約が入る', async () => {
+      await build({}, { previousState: previous });
+      expect(live.sessions[0].params.config.systemInstruction).toContain('- 前回は転生クエスト');
+    });
+
+    it('テスト用に起動する（引き継がない）: 指示はペルソナだけ', async () => {
+      await build({}, { previousState: previous, carryOver: false });
+      expect(live.sessions[0].params.config.systemInstruction).toBe('PERSONA');
+    });
+
+    it('終了する: 記憶を保存してからセッションを閉じる', async () => {
+      await build();
+      app.memory.add('配信者', '今日はここまで');
+      let closedWhenSaved;
+      const save = app.memory.save.bind(app.memory);
+      app.memory.save = () => {
+        closedWhenSaved = live.last().closed;
+        save();
+      };
+      await app.handleCommand('q');
+      expect(closedWhenSaved).toBe(false);
+      expect(live.last().closed).toBe(true);
+      const s = JSON.parse(fs.readFileSync(path.join(tmp, 'carryover.json'), 'utf8'));
+      expect(s.recent).toEqual([{ role: '配信者', text: '今日はここまで' }]);
     });
   });
 

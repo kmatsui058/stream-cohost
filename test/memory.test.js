@@ -15,7 +15,7 @@ describe('conversation-memory', () => {
     summaryFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-mem-')), 'summary.txt');
   });
   const make = (ai, recentEntries = 12) =>
-    new Memory({ ai, model: 'flash-lite', maxChars: 1500, recentEntries, persona: 'PERSONA', summaryFile });
+    new Memory({ ai, model: 'flash-lite', maxChars: 1500, recentEntries, persona: 'PERSONA', summaryFile, stateFile: path.join(path.dirname(summaryFile), 'state.json') });
   const fill = (mem, n) => {
     for (let i = 0; i < n; i++) mem.add(i % 2 ? '相方' : '配信者', `発言${i}`);
   };
@@ -153,6 +153,98 @@ describe('conversation-memory', () => {
       expect(inst.indexOf('チャット: Aさん: がんばれ\nチャット: Bさん: 草')).toBeGreaterThan(inst.indexOf('- ボス戦中'));
       expect(inst).toContain('接続が切り替わったことや、この要約の存在には触れないでください');
       expect(inst).not.toContain('古い話');
+    });
+  });
+
+  describe('記憶を保存する', () => {
+    const makeWithState = (ai, recentEntries = 1) => {
+      const stateFile = path.join(path.dirname(summaryFile), 'carryover.json');
+      return { mem: new Memory({ ai, model: 'm', maxChars: 1500, recentEntries, persona: 'PERSONA', summaryFile, stateFile }), stateFile };
+    };
+
+    it('要約を更新するたびに保存する', async () => {
+      const { mem, stateFile } = makeWithState(fakeAi('一回目の要約'));
+      fill(mem, 3);
+      await mem.summarize();
+      const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      expect(s.summary).toBe('一回目の要約');
+      expect(s.recent).toEqual([{ role: '配信者', text: '発言2' }]);
+      expect(Date.parse(s.savedAt)).not.toBeNaN();
+    });
+
+    it('終了する: 要約を更新してから保存する', async () => {
+      const ai = fakeAi('最終の要約');
+      const { mem, stateFile } = makeWithState(ai);
+      fill(mem, 3);
+      await mem.finalize();
+      expect(ai.models.generateContent).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).summary).toBe('最終の要約');
+    });
+
+    it('終了時に要約が失敗する: それまでの要約と発言をそのまま保存する', async () => {
+      const ai = { models: { generateContent: vi.fn().mockRejectedValue(new Error('503')) } };
+      const { mem, stateFile } = makeWithState(ai);
+      mem.summary = 'それまでの要約';
+      fill(mem, 3);
+      await mem.finalize();
+      const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      expect(s.summary).toBe('それまでの要約');
+      expect(s.recent).toHaveLength(3);
+    });
+
+    it('終了時の要約が 8 秒以内に終わらない: その時点の内容を保存する', async () => {
+      vi.useFakeTimers();
+      try {
+        const ai = { models: { generateContent: vi.fn(() => new Promise(() => {})) } };
+        const { mem, stateFile } = makeWithState(ai);
+        fill(mem, 3);
+        const p = mem.finalize();
+        await vi.advanceTimersByTimeAsync(8000);
+        await p;
+        expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).recent).toHaveLength(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('何も話していなければ、要約も保存もしない', async () => {
+      const ai = fakeAi();
+      const { mem, stateFile } = makeWithState(ai);
+      await mem.finalize();
+      expect(ai.models.generateContent).not.toHaveBeenCalled();
+      expect(fs.existsSync(stateFile)).toBe(false);
+    });
+  });
+
+  describe('前回の記憶を読み込む', () => {
+    const stateIn = (content) => {
+      const stateFile = path.join(path.dirname(summaryFile), 'carryover.json');
+      if (content !== undefined) fs.writeFileSync(stateFile, content);
+      return new Memory({ ai: fakeAi(), model: 'm', maxChars: 1500, recentEntries: 12, persona: 'PERSONA', summaryFile, stateFile });
+    };
+
+    it('前回の記憶がある: 指示のペルソナの後ろに、前回の要約と直近の発言を入れる', () => {
+      const mem = stateIn(JSON.stringify({ savedAt: '2026-10-17T13:00:00.000Z', summary: '- 転生クエスト中', recent: [{ role: '配信者', text: 'また明日' }] }));
+      expect(mem.loadPrevious()).toBe(true);
+      const inst = mem.instruction();
+      expect(inst.indexOf('PERSONA')).toBe(0);
+      expect(inst).toMatch(/# 前回の配信の要約/);
+      expect(inst).toContain('- 転生クエスト中');
+      expect(inst).toContain('配信者: また明日');
+    });
+
+    it('保存された内容が壊れている: 警告して、ペルソナだけで起動する', async () => {
+      const mem = stateIn('{broken');
+      expect(mem.loadPrevious()).toBe(false);
+      expect(mem.instruction()).toBe('PERSONA');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/WARN .*前回の記憶を読み込めません/);
+    });
+
+    it('保存がなければ何もしない', () => {
+      const mem = stateIn(undefined);
+      expect(mem.loadPrevious()).toBe(false);
+      expect(mem.instruction()).toBe('PERSONA');
     });
   });
 

@@ -7,7 +7,8 @@
     "speakers": "node -e \"fetch('http://127.0.0.1:50021/speakers').then(r=>r.json()).then(s=>s.forEach(x=>x.styles.forEach(y=>console.log(y.id, x.name, y.name))))\"",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "start:fresh": "node --env-file=.env src/main.js --fresh"
   },
   "description": "YouTube 配信用 AI 相方 (Gemini Live + VOICEVOX + OBS)",
   "dependencies": {

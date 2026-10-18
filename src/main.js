@@ -14,7 +14,8 @@ if (missing.length) {
 }
 
 const exit = () => setTimeout(() => process.exit(0), 300);
-const app = createApp(config, { onQuit: exit });
+// --fresh: 前回の記憶を引き継がずに起動する（テスト用。npm run start:fresh）
+const app = createApp(config, { onQuit: exit, carryOver: !process.argv.includes('--fresh') });
 await app.start();
 
 readline.createInterface({ input: process.stdin }).on('line', (line) => app.handleCommand(line));

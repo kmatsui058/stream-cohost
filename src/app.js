@@ -22,10 +22,15 @@ export function createApp(config, deps = {}) {
   const fetchFn = deps.fetch ?? fetch;
   const ai = deps.ai ?? new GoogleGenAI({ apiKey: config.gemini.apiKey });
   const onQuit = deps.onQuit ?? (() => {});
+  const carryOver = deps.carryOver ?? true; // 前回の記憶を引き継ぐか（npm run start:fresh で false）
 
   const overlay = new Overlay(config.overlay);
   const gemini = new GeminiLive(config.gemini, ai);
-  const memory = new Memory({ ai, persona: config.gemini.persona, ...config.memory, ...(deps.summaryFile && { summaryFile: deps.summaryFile }) });
+  const memory = new Memory({
+    ai, persona: config.gemini.persona, ...config.memory,
+    ...(deps.summaryFile && { summaryFile: deps.summaryFile }),
+    ...(deps.stateFile && { stateFile: deps.stateFile }),
+  });
   gemini.memory = memory;
   const speaker = new Speaker(overlay, config.voicevox, {
     synthesize: deps.synthesize ?? ((text, cfg) => synthesize(text, cfg, fetchFn)),
@@ -58,6 +63,8 @@ export function createApp(config, deps = {}) {
   async function start() {
     await checkVoicevox(config.voicevox.url, fetchFn);
     const port = await overlay.start();
+    if (carryOver) memory.loadPrevious();
+    else log.info('前回の記憶は引き継がずに起動します');
     await gemini.connect();
     mic.start();
     obs.start();
@@ -77,6 +84,7 @@ export function createApp(config, deps = {}) {
     obs.stop();
     chat.stop();
     director.dispose();
+    await memory.finalize(); // 要約して保存してから閉じる（要約に AI を使うので先に）
     gemini.close();
     await overlay.close();
   }
