@@ -8,7 +8,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "start:fresh": "node --env-file=.env src/main.js --fresh"
+    "start:fresh": "node --env-file=.env src/main.js --fresh",
+    "eval": "node --env-file=.env eval/run.js"
   },
   "description": "YouTube 配信用 AI 相方 (Gemini Live + VOICEVOX + OBS)",
   "dependencies": {
