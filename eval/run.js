@@ -4,8 +4,11 @@
 //   npm run eval -- --baseline <git の版>               # 比較用の persona の版を変える
 //   npm run eval -- --experiment eval/experiments/depth.json   # 条件を設定ファイルで指定する
 //
-// 設定ファイルの variants: [{ name, persona: "file:<パス>" | "git:<版>", model?, thinkingLevel? }]
-// 実際の Gemini Live を呼ぶので課金が発生し、結果も毎回変わる。CI では実行しない。
+//   npm run eval -- --cases <ケースのファイル> --stream <今日の配信の情報のファイル>
+//
+// 設定ファイルの variants: [{ name, persona: "file:<パス>" | "git:<版>", model?, thinkingLevel?, tools?, api? }]
+// api: "text" にすると、Live ではなく通常の生成 API で返事を受け取る（gemini-3.8-flash など）。
+// 実際の Gemini を呼ぶので課金が発生し、結果も毎回変わる。CI では実行しない。
 // 制約: ログに画面の画像が無いので、入力はテキストだけ（画面への反応は評価できない）。
 import fs from 'node:fs';
 import path from 'node:path';
@@ -15,6 +18,7 @@ import { configureLogging } from '../src/log.js';
 import { loadConfig } from '../src/config.js';
 import { idlePromptText } from '../src/director.js';
 import { checkReply, summarize, CHECKS } from './checks.js';
+import { askText } from './ask-text.js';
 
 const DEFAULT_BASELINE = '8ff7a55'; // 2026-10-18 の初配信で使っていた persona
 const TIMEOUT_MS = 60000; // 考える量を増やすと遅くなるので長めに
@@ -27,7 +31,7 @@ const config = loadConfig();
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 const casesFile = argOf('--cases') ?? 'eval/cases.json';
 const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'));
-const stream = JSON.parse(fs.readFileSync('eval/stream.json', 'utf8'));
+const stream = JSON.parse(fs.readFileSync(argOf('--stream') ?? 'eval/stream.json', 'utf8'));
 const streamSection = `\n\n# 今日の配信\nタイトル: ${stream.title}\n概要欄:\n${stream.description}`;
 
 function loadPersona(spec) {
@@ -55,12 +59,21 @@ const variants = experiment.variants.map((v) => ({
 
 // 1 回の入力に対する相方の返事（出力の文字起こし）と、返事が終わるまでの時間を受け取る
 async function ask(v, text, context) {
+  // ケースに直前のやり取りがあれば、本番と同じ形（「話者: 発言」）で指示に入れる
+  const systemInstruction = v.instruction + (context?.length ? `\n\n# 直前のやり取り\n${context.join('\n')}` : '');
+  if (v.api === 'text') {
+    let timer;
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('タイムアウト')), TIMEOUT_MS); });
+    try {
+      return await Promise.race([askText(ai, v, systemInstruction, text), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   let session;
   let out = '';
   let t0;
   let firstMs = null;
-  // ケースに直前のやり取りがあれば、本番と同じ形（「話者: 発言」）で指示に入れる
-  const systemInstruction = v.instruction + (context?.length ? `\n\n# 直前のやり取り\n${context.join('\n')}` : '');
   const liveConfig = { responseModalities: [Modality.AUDIO], systemInstruction, outputAudioTranscription: {} };
   if (v.thinkingLevel) liveConfig.thinkingConfig = { thinkingLevel: v.thinkingLevel };
   if (v.tools?.length) liveConfig.tools = v.tools.map((name) => ({ [name]: {} }));
@@ -148,7 +161,7 @@ const avgLen = variants.map((_, vi) => replies.reduce((a, rs) => a + [...rs[vi].
 
 let md = `# プロンプト評価 ${new Date().toLocaleString('ja-JP')}\n\n${experiment.description ?? ''}\n\n`;
 md += `- ケース: ${cases.length}（${casesFile}。入力はテキストのみ。画面は見せていない）\n- 今日の配信: ${stream.title}\n`;
-for (const v of variants) md += `- ${v.name}: persona=${v.persona} / model=${v.model}${v.thinkingLevel ? ` / thinking=${v.thinkingLevel}` : ''}${v.tools?.length ? ` / tools=${v.tools.join(',')}` : ''}\n`;
+for (const v of variants) md += `- ${v.name}: persona=${v.persona} / model=${v.model}${v.api === 'text' ? ' / api=text' : ''}${v.thinkingLevel ? ` / thinking=${v.thinkingLevel}` : ''}${v.tools?.length ? ` / tools=${v.tools.join(',')}` : ''}\n`;
 md += `\n## 集計（該当した返事の数 / ${cases.length}）\n\n| 項目 | ${variants.map((v) => v.name).join(' | ')} |\n|---|${variants.map(() => '---').join('|')}|\n`;
 md += `| 平均の最初の文字までの時間 | ${avgFirst.map(sec).join(' | ')} |\n`;
 md += `| 平均の返事が終わるまでの時間 | ${avgMs.map(sec).join(' | ')} |\n`;
