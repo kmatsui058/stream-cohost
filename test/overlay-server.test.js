@@ -127,15 +127,35 @@ describe('stream-overlay（サーバー側）', () => {
     };
 
     it('表示名と立ち絵の有無 / 立ち絵ありで画面が接続する: 表示名と「立ち絵あり」を送る', async () => {
-      expect(await profileOf(charDir(['default.png', 'smile.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: true });
+      expect(await profileOf(charDir(['default.png', 'smile.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: true, present: false });
     });
 
     it('表示名と立ち絵の有無 / 立ち絵が片方しかない: 「立ち絵なし」を送る', async () => {
-      expect(await profileOf(charDir(['default.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false });
+      expect(await profileOf(charDir(['default.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false });
     });
 
     it('表示名と立ち絵の有無 / 立ち絵フォルダが未設定: 「立ち絵なし」を送る', async () => {
-      expect(await profileOf('')).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false });
+      expect(await profileOf('')).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false });
+    });
+
+    it('召喚中だけ相方を表示する / 召喚と退去: 表示と非表示の指示を届ける', async () => {
+      const port = await start();
+      const ws = await open(port);
+      sockets.push(ws);
+      await until(() => ws.received.length === 1);
+      overlay.setPresence(true);
+      overlay.setPresence(false);
+      await until(() => ws.received.length === 3);
+      expect(ws.received.slice(1)).toEqual([{ type: 'presence', visible: true }, { type: 'presence', visible: false }]);
+    });
+
+    it('召喚中だけ相方を表示する / 召喚中に画面が接続する: 接続時に「表示中」を送る', async () => {
+      const port = await start();
+      overlay.setPresence(true);
+      const ws = await open(port);
+      sockets.push(ws);
+      await until(() => ws.received.length === 1);
+      expect(ws.received[0]).toMatchObject({ type: 'profile', present: true });
     });
 
     it('立ち絵の画像を配信する / 立ち絵を取得する: フォルダ内の smile.png を返す', async () => {

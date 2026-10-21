@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createApp, HELP } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { logFilePath } from '../src/log.js';
@@ -16,7 +16,10 @@ describe('組み立てと操作', () => {
   let app, live, sp, onQuit, tmp;
   const build = async (extraEnv = {}, { previousState, carryOver } = {}) => {
     live = fakeLiveAi();
-    live.ai.models = { generateContent: vi.fn(async () => ({ text: '要約' })) };
+    // 答える役（gemini-4-argon）と要約（gemini-3.8-flash）の偽物
+    live.ai.models = {
+      generateContent: vi.fn(async (req) => ({ text: req.model === 'gemini-4-argon' ? 'はい、マスター。' : '要約' })),
+    };
     sp = fakeSpawner();
     onQuit = vi.fn();
     const config = loadConfig({ ...env, ...extraEnv }, () => 'PERSONA');
@@ -38,9 +41,9 @@ describe('組み立てと操作', () => {
   };
   afterEach(async () => {
     await app?.shutdown();
-    vi.useRealTimers();
   });
   const sent = () => live.last().sent;
+  const asks = () => live.ai.models.generateContent.mock.calls.map((c) => c[0]).filter((r) => r.model === 'gemini-4-argon');
   const readLog = async () => {
     await new Promise((r) => setTimeout(r, 50));
     return fs.readFileSync(logFilePath(), 'utf8');
@@ -55,16 +58,26 @@ describe('組み立てと操作', () => {
       expect(app.director.paused).toBe(false);
     });
 
-    it('テキストで話しかける: t こんにちは', async () => {
+    it('テキストで話しかける: 待機中に t オルダ、こんにちは → 記録し、召喚して問い合わせる', async () => {
       await build();
-      app.handleCommand('t こんにちは');
-      expect(sent()).toContainEqual({ text: 'こんにちは' });
+      app.handleCommand('t オルダ、こんにちは');
+      expect(app.memory.transcript()).toContain('配信者: オルダ、こんにちは');
+      expect(app.director.summoned).toBe(true);
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
     });
 
-    it('本文のない t: 何も送らない', async () => {
+    it('本文のない t: 何も記録せず、問い合わせない', async () => {
       await build();
       app.handleCommand('t ');
-      expect(sent()).toEqual([]);
+      expect(app.memory.entries).toHaveLength(0);
+      expect(asks()).toHaveLength(0);
+    });
+
+    it('手で召喚する: o', async () => {
+      await build();
+      app.handleCommand('o');
+      expect(app.director.summoned).toBe(true);
+      expect(app.overlay.present).toBe(true);
     });
 
     it('s: 発話を中断する', async () => {
@@ -81,11 +94,11 @@ describe('組み立てと操作', () => {
       expect(start).toHaveBeenCalledWith('abc123');
     });
 
-    it('r: 要約して張り直す', async () => {
+    it('r: 今すぐ要約する', async () => {
       await build();
-      const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
+      const summarize = vi.spyOn(app.memory, 'summarize').mockResolvedValue();
       app.handleCommand('r');
-      expect(rotate).toHaveBeenCalledWith('手動');
+      expect(summarize).toHaveBeenCalledTimes(1);
     });
 
     it('m: 現在の記憶を表示する', async () => {
@@ -101,17 +114,38 @@ describe('組み立てと操作', () => {
     });
   });
 
+  describe('live-session / 聞く役の配線', () => {
+    it('文字起こし専用のモデルに、召喚の言葉を登録語として接続する', async () => {
+      await build();
+      const p = live.sessions[0].params;
+      expect(p.model).toBe('gemini-3.5-transcribe-live');
+      expect(p.config.inputAudioTranscription.customVocabulary).toContain('オルダ');
+    });
+
+    it('区切られた発話は進行役に渡り、名前があれば召喚して問い合わせ、返事を読み上げ、画面に相方を出す', async () => {
+      await build();
+      const push = vi.spyOn(app.speaker, 'push');
+      live.last().receive({ serverContent: { inputTranscription: { text: 'オルダ、聞こえる?' } } });
+      expect(app.overlay.present).toBe(true);
+      await vi.waitFor(() => expect(push).toHaveBeenCalledWith('はい、マスター。'));
+    });
+  });
+
   describe('conversation-memory / 前回の記憶の引き継ぎ', () => {
     const previous = JSON.stringify({ savedAt: '2026-10-17T13:00:00.000Z', summary: '- 前回は転生クエスト', recent: [] });
 
-    it('前回の記憶がある: 最初のセッションへの指示に前回の要約が入る', async () => {
+    it('前回の記憶がある: 問い合わせの指示に前回の要約が入る', async () => {
       await build({}, { previousState: previous });
-      expect(live.sessions[0].params.config.systemInstruction).toContain('- 前回は転生クエスト');
+      app.handleCommand('t オルダ');
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
+      expect(asks()[0].config.systemInstruction).toContain('- 前回は転生クエスト');
     });
 
     it('テスト用に起動する（引き継がない）: 指示はペルソナだけ', async () => {
       await build({}, { previousState: previous, carryOver: false });
-      expect(live.sessions[0].params.config.systemInstruction).toBe('PERSONA');
+      app.handleCommand('t オルダ');
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
+      expect(asks()[0].config.systemInstruction).toBe('PERSONA');
     });
 
     it('終了する: 記憶を保存してからセッションを閉じる', async () => {
@@ -169,46 +203,24 @@ describe('組み立てと操作', () => {
     });
   });
 
-  describe('screen-capture / 一時停止中は画面を送らない', () => {
-    it('一時停止中: 取り込んだ画像は送られない', async () => {
+  describe('screen-capture / 直近の画面を持っておく', () => {
+    it('枚数を超えて取り込む: 直近の 3 枚が古い順に残り、問い合わせに添えられる', async () => {
       await build();
-      app.obs.emit('frame', 'QUJD');
-      app.handleCommand('p');
-      app.obs.emit('frame', 'REVG');
-      expect(sent().filter((m) => m.video).map((m) => m.video.data)).toEqual(['QUJD']);
+      for (const f of ['f1', 'f2', 'f3', 'f4']) app.obs.emit('frame', f);
+      expect(app.frames).toEqual(['f2', 'f3', 'f4']);
+      app.handleCommand('t オルダ、これ何?');
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
+      const images = asks()[0].contents[0].parts.filter((p) => p.inlineData).map((p) => p.inlineData.data);
+      expect(images).toEqual(['f2', 'f3', 'f4']);
     });
   });
 
-  describe('turn-taking / 画面の接続状態の配線', () => {
-    it('画面が未接続なら音が届かないと判定し、つながると届くと判定して沈黙の起点を更新する', async () => {
+  describe('stream-info / 配信の情報を指示に入れる', () => {
+    it('起動後に配信の情報を受け取る: 張り直さず、次の問い合わせの指示に入る', async () => {
       await build();
-      const { port } = app.overlay.server.address();
-      expect(app.director.isAudible()).toBe(false);
-      app.director.lastActivity = 0;
-      const ws = new (await import('ws')).default(`ws://127.0.0.1:${port}`);
-      await new Promise((r) => ws.on('open', r));
-      await vi.waitFor(() => expect(app.director.isAudible()).toBe(true));
-      expect(Date.now() - app.director.lastActivity).toBeLessThan(1000);
-      ws.close();
-    });
-  });
-
-  describe('stream-info / 配信の情報が変わったら張り直す', () => {
-    it('起動後に v で配信を指定する: 張り直して、新しい指示に配信の情報が入る', async () => {
-      await build();
-      const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
       app.chat.emit('info', { videoId: 'v1', title: '【RO】EP追想#5', description: '概要' });
-      expect(rotate).toHaveBeenCalledTimes(1);
+      expect(live.sessions).toHaveLength(1);
       expect(app.memory.instruction()).toContain('タイトル: 【RO】EP追想#5');
-    });
-
-    it('同じ配信をもう一度指定する: 張り直さない', async () => {
-      await build();
-      const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
-      const info = { videoId: 'v1', title: 't', description: 'd' };
-      app.chat.emit('info', info);
-      app.chat.emit('info', { ...info });
-      expect(rotate).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -222,68 +234,10 @@ describe('組み立てと操作', () => {
   });
 
   describe('live-chat → turn-taking の配線', () => {
-    it('取得したチャットは進行役に渡る', async () => {
+    it('取得したチャットは記録される', async () => {
       await build();
       app.chat.emit('messages', [{ author: 'a', text: 'b' }]);
-      expect(app.director.chatQueue).toEqual([{ author: 'a', text: 'b' }]);
+      expect(app.memory.transcript()).toBe('チャット: a: b');
     });
-  });
-
-  describe('live-session / コンテキストが大きくなったら張り直す', () => {
-    let rotate;
-    beforeEach(async () => {
-      await build();
-      rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
-    });
-
-    it('上限を超えて場が空いた: 張り直す', () => {
-      app.gemini.promptTokens = 24001;
-      app.checkRotate();
-      expect(rotate).toHaveBeenCalledWith('コンテキスト 24001 > 24000');
-    });
-
-    it('上限を超えたが相方が喋っている: 張り直さない', () => {
-      app.gemini.promptTokens = 30000;
-      app.speaker.push('喋っています。');
-      app.checkRotate();
-      expect(rotate).not.toHaveBeenCalled();
-    });
-
-    it('上限以下なら張り直さない', () => {
-      app.gemini.promptTokens = 24000;
-      app.checkRotate();
-      expect(rotate).not.toHaveBeenCalled();
-    });
-
-    it('クールダウン中は張り直さない', () => {
-      app.gemini.promptTokens = 30000;
-      app.gemini.nextRotateAt = Date.now() + 60_000;
-      app.checkRotate();
-      expect(rotate).not.toHaveBeenCalled();
-    });
-  });
-
-  it('live-session / 上限の設定が 0 なら張り直さない', async () => {
-    await build({ ROTATE_AT_TOKENS: '0' });
-    const rotate = vi.spyOn(app.gemini, 'rotate').mockResolvedValue();
-    app.gemini.promptTokens = 1e9;
-    app.checkRotate();
-    expect(rotate).not.toHaveBeenCalled();
-  });
-
-  it('live-session / 要約 API が落ちている: ハンドルで張り直し、5 分間はトークン数で張り直さない', async () => {
-    await build();
-    live.ai.models.generateContent.mockRejectedValue(new Error('503'));
-    for (let i = 0; i < 20; i++) app.memory.add(i % 2 ? '相方' : '配信者', `x${i}`);
-    live.last().receive({ sessionResumptionUpdate: { resumable: true, newHandle: 'h' } });
-    app.gemini.promptTokens = 30000;
-    app.checkRotate();
-    await vi.waitFor(() => expect(live.sessions).toHaveLength(2));
-    expect(live.last().params.config.sessionResumption).toEqual({ handle: 'h' });
-    expect(app.gemini.nextRotateAt - Date.now()).toBeGreaterThan(299_000);
-    app.gemini.promptTokens = 30000;
-    app.checkRotate();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(live.sessions).toHaveLength(2);
   });
 });

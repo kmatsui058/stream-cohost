@@ -1,389 +1,297 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Director, IDLE_TOPICS, IDLE_CLOSING } from '../src/director.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { Director, splitSentences, isSilentReply, DISMISS_MARKER } from '../src/director.js';
+import { Memory } from '../src/memory.js';
 import { logFilePath } from '../src/log.js';
 
-const cfg = { idleMinSec: 25, idleMaxSec: 45, bargeIn: true };
-
-function fakeGemini() {
-  const g = new EventEmitter();
-  g.ready = true;
-  g.sendText = vi.fn(() => g.ready);
-  return g;
-}
 function fakeSpeaker() {
   const s = new EventEmitter();
   s.speaking = false;
-  s.push = vi.fn();
-  s.stop = vi.fn(() => (s.speaking = false));
+  s.pushed = [];
+  s.push = vi.fn((t) => s.pushed.push(t));
+  s.stop = vi.fn();
   return s;
 }
-function fakeMemory() {
-  return { add: vi.fn() };
+
+// 返事を 1 つずつ手で返せる答える役
+function manualResponder() {
+  const calls = [];
+  return {
+    calls,
+    ask: vi.fn((req) => new Promise((resolve, reject) => calls.push({ req, resolve, reject }))),
+    reply: async (text) => {
+      calls.shift().resolve(text);
+      await flush();
+    },
+  };
 }
 
-describe('turn-taking', () => {
-  let gemini, speaker, memory, director;
-  const make = (over = {}) => {
-    director = new Director({ gemini, speaker, memory, cfg: { ...cfg, ...over }, random: () => 0.5 });
-    return director;
-  };
-  beforeEach(() => {
-    vi.useFakeTimers();
-    gemini = fakeGemini();
-    speaker = fakeSpeaker();
-    memory = fakeMemory();
+const flush = () => new Promise((r) => setTimeout(r, 0));
+const readLog = async () => {
+  await flush();
+  await new Promise((r) => setTimeout(r, 30));
+  return fs.readFileSync(logFilePath(), 'utf8');
+};
+
+function setup({ cfg = {}, frames = [] } = {}) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-dir-'));
+  const memory = new Memory({
+    ai: { models: { generateContent: vi.fn(async () => ({ text: '要約' })) } },
+    model: 'm', maxChars: 4000, recentEntries: 12, persona: 'PERSONA',
+    summaryFile: path.join(dir, 'summary.txt'), stateFile: path.join(dir, 'state.json'),
   });
-  afterEach(() => {
-    director?.dispose();
-    vi.useRealTimers();
+  const speaker = fakeSpeaker();
+  const responder = manualResponder();
+  const presence = [];
+  const director = new Director({
+    responder, speaker, memory,
+    cfg: { bargeIn: true, ...cfg },
+    summonWords: ['オルダ', 'ヴァール'],
+    getFrames: () => frames,
   });
-  const pushed = () => speaker.push.mock.calls.map((c) => c[0]);
+  director.on('presence', (v) => presence.push(v));
+  return { director, memory, speaker, responder, presence };
+}
 
-  describe('発言を文単位で読み上げに回す', () => {
-    it('細切れに届いた発言: 3 文がこの順で回される', () => {
-      make();
-      for (const t of ['こんにちは、', '相方の', 'テストです。画面', '見えて', 'ますか？', '始めましょう']) gemini.emit('modelText', t);
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual(['こんにちは、相方のテストです。', '画面見えてますか？', '始めましょう']);
+describe('turn-taking / answering（召喚・会話・退去）', () => {
+  afterEach(() => vi.useRealTimers());
+
+  describe('名前で召喚する', () => {
+    it('名前を呼ぶ: 召喚され、問い合わせが行われる', () => {
+      const { director, responder, presence } = setup();
+      director.onUtterance('オルダ、ニブルヘイムってどんな場所?');
+      expect(director.summoned).toBe(true);
+      expect(presence).toEqual([true]);
+      expect(responder.ask).toHaveBeenCalledTimes(1);
     });
 
-    it('区切り記号が連続する: 「えっ！？」が 1 文、「本当に」は残る', () => {
-      make();
-      gemini.emit('modelText', 'えっ！？本当に');
-      expect(pushed()).toEqual(['えっ！？']);
-      expect(director.buf).toBe('本当に');
+    it('名前を呼ばない独り言: 問い合わせず、記録はする', () => {
+      const { director, responder, memory } = setup();
+      director.onUtterance('合ってるか、こっちで。');
+      expect(director.summoned).toBe(false);
+      expect(responder.ask).not.toHaveBeenCalled();
+      expect(memory.transcript()).toBe('配信者: 合ってるか、こっちで。');
     });
 
-    it('改行と ♪ でも区切り、空白だけの残りは回さない', () => {
-      make();
-      gemini.emit('modelText', 'ららら♪\nはい\n  ');
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual(['ららら♪\n', 'はい\n']);
+    it('ひらがなで書き起こされても召喚する', () => {
+      const { director } = setup();
+      director.onUtterance('おるだ、聞こえる?');
+      expect(director.summoned).toBe(true);
     });
 
-    it('相方の発言を記憶に記録する', () => {
-      make();
-      gemini.emit('modelText', 'やあ');
-      expect(memory.add).toHaveBeenCalledWith('相方', 'やあ');
-    });
-  });
-
-  describe('黙る合図の返事は読み上げない', () => {
-    it('黙ると判断した: 「スルー。」だけなら読み上げない', () => {
-      make();
-      gemini.emit('modelText', 'スルー。');
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual([]);
+    it('チャットで名前を呼ぶ: 召喚され、問い合わせが行われる', () => {
+      const { director, responder, memory } = setup();
+      director.addChat([{ author: 'Aさん', text: 'オルダちゃんこんばんは' }]);
+      expect(director.summoned).toBe(true);
+      expect(responder.ask).toHaveBeenCalledTimes(1);
+      expect(memory.transcript()).toBe('チャット: Aさん: オルダちゃんこんばんは');
     });
 
-    it('句読点なしで届いた: 「スルー」だけでも読み上げない（細切れでも）', () => {
-      make();
-      gemini.emit('modelText', 'スル');
-      gemini.emit('modelText', 'ー ');
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual([]);
-    });
-
-    it('文の一部に含まれる: 通常どおり読み上げる', () => {
-      make();
-      gemini.emit('modelText', '今回はスルーしましょう。');
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual(['今回はスルーしましょう。']);
-    });
-
-    it('黙ったあとも、生成中の状態は解除される', () => {
-      make();
-      gemini.emit('modelText', 'スルー。');
-      gemini.emit('turnComplete');
-      expect(director.quiet).toBe(true);
+    it('待機中の名前のないチャット: 問い合わせず、記録はする', () => {
+      const { director, responder, memory } = setup();
+      director.addChat([{ author: 'Aさん', text: 'こんばんは' }, { author: 'Bさん', text: '草' }]);
+      expect(responder.ask).not.toHaveBeenCalled();
+      expect(memory.entries).toHaveLength(2);
     });
   });
 
-  describe('配信者の割り込みで黙る', () => {
-    it('相方の発話中に配信者が話す: 発話が止まり、記憶に記録する', () => {
-      make();
+  describe('召喚中の発話に答える', () => {
+    it('召喚中に配信者が話す: 指示・記録・画面を渡して問い合わせる（名前がなくても）', async () => {
+      const { director, responder } = setup({ frames: ['f1', 'f2', 'f3'] });
+      director.onUtterance('オルダ');
+      await responder.reply('はい、マスター。');
+      director.onUtterance('この敵の弱点は?');
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+      const req = responder.calls[0].req;
+      expect(req.instruction).toBe('PERSONA');
+      expect(req.transcript.split('\n').at(-1)).toBe('配信者: この敵の弱点は?');
+      expect(req.frames).toEqual(['f1', 'f2', 'f3']);
+    });
+
+    it('召喚中にチャットが届く: 問い合わせる', async () => {
+      const { director, responder } = setup();
+      director.onUtterance('オルダ');
+      await responder.reply('はい。');
+      director.addChat([{ author: 'Aさん', text: 'こんばんは' }]);
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+    });
+
+    it('問い合わせ中に続けて話す: 記録に加え、返事の後にもう 1 回だけまとめて問い合わせる', async () => {
+      const { director, responder, memory } = setup();
+      director.onUtterance('オルダ、質問');
+      director.onUtterance('一つ目');
+      director.onUtterance('二つ目');
+      expect(responder.ask).toHaveBeenCalledTimes(1);
+      await responder.reply('スルー');
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+      expect(responder.calls[0].req.transcript).toContain('配信者: 一つ目\n配信者: 二つ目');
+      await responder.reply('スルー');
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+      expect(memory.entries.filter((e) => e.role === '配信者')).toHaveLength(3);
+    });
+  });
+
+  describe('返事を読み上げる', () => {
+    it('返事が届く: 文に区切ってこの順に読み上げに回し、相方の発言として記録する', async () => {
+      const { director, responder, speaker, memory } = setup();
+      director.onUtterance('オルダ、この敵の弱点は?');
+      await responder.reply('弱点は火属性です。ただ、耐性装備の可能性もあります。');
+      expect(speaker.pushed).toEqual(['弱点は火属性です。', 'ただ、耐性装備の可能性もあります。']);
+      expect(memory.entries.at(-1)).toEqual({ role: '相方', text: '弱点は火属性です。ただ、耐性装備の可能性もあります。' });
+    });
+
+    it('黙ると判断した: 読み上げず、黙ったことを記録する', async () => {
+      const { director, responder, speaker } = setup();
+      director.onUtterance('オルダ');
+      await responder.reply('スルー。');
+      expect(speaker.pushed).toEqual([]);
+      expect(await readLog()).toContain('（黙ると判断）');
+    });
+
+    it('答えて退去する: 合図を除いた残りだけを読み上げ、退去する', async () => {
+      const { director, responder, speaker } = setup();
+      director.onUtterance('オルダ、ありがとう');
+      await responder.reply(`どういたしまして。${DISMISS_MARKER}`);
+      expect(speaker.pushed).toEqual(['どういたしまして。']);
+      expect(director.summoned).toBe(false);
+    });
+  });
+
+  describe('退去する', () => {
+    it('退去の合図が届く: 読み上げが終わってから消え、その後の名前のない発話では問い合わせない', async () => {
+      const { director, responder, speaker, presence } = setup();
+      director.onUtterance('オルダ、ありがとう');
       speaker.speaking = true;
-      gemini.emit('userText', 'ちょっと待って');
-      expect(speaker.stop).toHaveBeenCalledTimes(1);
-      expect(memory.add).toHaveBeenCalledWith('配信者', 'ちょっと待って');
+      await responder.reply(`どういたしまして。${DISMISS_MARKER}`);
+      expect(presence).toEqual([true]);
+      speaker.speaking = false;
+      speaker.emit('idle');
+      expect(presence).toEqual([true, false]);
+      director.onUtterance('さて次に行こう');
+      expect(responder.ask).toHaveBeenCalledTimes(1);
+      expect(await readLog()).toContain('退去しました');
+    });
+
+    it('合図だけの返事: 何も読み上げずに退去する', async () => {
+      const { director, responder, speaker, presence } = setup();
+      director.onUtterance('オルダ');
+      await responder.reply(`スルー${DISMISS_MARKER}`);
+      expect(speaker.pushed).toEqual([]);
+      expect(presence).toEqual([true, false]);
+    });
+
+    it('退去の読み上げ中にもう一度呼ばれる: 消えずに召喚中のまま', async () => {
+      const { director, responder, speaker, presence } = setup();
+      director.onUtterance('オルダ');
+      speaker.speaking = true;
+      await responder.reply(`では。${DISMISS_MARKER}`);
+      director.onUtterance('オルダ、待って');
+      speaker.speaking = false;
+      speaker.emit('idle');
+      expect(director.summoned).toBe(true);
+      expect(presence).toEqual([true]);
+    });
+
+    it('退去したら、問い合わせ中に届いていた発話では問い合わせない', async () => {
+      const { director, responder } = setup();
+      director.onUtterance('オルダ、ありがとう');
+      director.onUtterance('助かった');
+      await responder.reply(`どういたしまして。${DISMISS_MARKER}`);
+      expect(responder.ask).toHaveBeenCalledTimes(1);
+    });
+
+    it('手で召喚と退去を切り替える', () => {
+      const { director, responder, presence } = setup();
+      director.toggleSummon();
+      expect(director.summoned).toBe(true);
+      expect(responder.ask).not.toHaveBeenCalled();
+      director.toggleSummon();
+      expect(director.summoned).toBe(false);
+      expect(presence).toEqual([true, false]);
+    });
+  });
+
+  describe('問い合わせの失敗で止まらない', () => {
+    it('問い合わせがエラーになる: エラーを記録し、何も読み上げず、次の発話で再び問い合わせる', async () => {
+      const { director, responder, speaker } = setup();
+      director.onUtterance('オルダ');
+      responder.calls.shift().reject(new Error('503'));
+      await flush();
+      expect(speaker.pushed).toEqual([]);
+      expect(director.summoned).toBe(true);
+      director.onUtterance('聞こえる?');
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+      expect(await readLog()).toMatch(/ERROR .*問い合わせに失敗/);
+    });
+  });
+
+  describe('配信者が話し始めたら黙る', () => {
+    it('相方の発話中に配信者が話す: 発話が止まる', () => {
+      const { director, speaker } = setup();
+      speaker.speaking = true;
+      director.onUtterance('ちょっと待って');
+      expect(speaker.stop).toHaveBeenCalled();
     });
 
     it('短い雑音: 1 文字では止まらない', () => {
-      make();
+      const { director, speaker } = setup();
       speaker.speaking = true;
-      gemini.emit('userText', ' あ ');
+      director.onUtterance('あ');
       expect(speaker.stop).not.toHaveBeenCalled();
     });
 
     it('設定で無効にしていれば止まらない', () => {
-      make({ bargeIn: false });
+      const { director, speaker } = setup({ cfg: { bargeIn: false } });
       speaker.speaking = true;
-      gemini.emit('userText', 'ちょっと待って');
+      director.onUtterance('ちょっと待って');
       expect(speaker.stop).not.toHaveBeenCalled();
     });
-
-    it('AI からの割り込み通知: 発話が止まり、溜まっていた発言は読み上げない', () => {
-      make({ bargeIn: false });
-      gemini.emit('modelText', 'それでね');
-      gemini.emit('interrupted');
-      gemini.emit('turnComplete');
-      expect(speaker.stop).toHaveBeenCalledTimes(1);
-      expect(pushed()).toEqual([]);
-    });
   });
 
-  describe('場が空いているかを判定する', () => {
-    it('初期状態で配信者が 3 秒以上黙っていれば空いている', () => {
-      make();
-      expect(director.quiet).toBe(true);
-    });
-
-    it('相方が喋っている／AI が生成中なら空いていない', () => {
-      make();
-      speaker.speaking = true;
-      expect(director.quiet).toBe(false);
-      speaker.speaking = false;
-      gemini.emit('modelText', '考え中');
-      expect(director.quiet).toBe(false);
-      gemini.emit('turnComplete');
-      expect(director.quiet).toBe(true);
-    });
-
-    it('応答待ちが長引いた: 注入から 15 秒経てば空いている', () => {
-      make();
-      director.inject('テスト');
-      vi.advanceTimersByTime(14_999);
-      expect(director.quiet).toBe(false);
-      vi.advanceTimersByTime(1);
-      expect(director.quiet).toBe(true);
-    });
-
-    it('配信者が話した直後: 2 秒前なら空いていない、3 秒を過ぎたら空いている', () => {
-      make();
-      gemini.emit('userText', 'えーと');
-      vi.advanceTimersByTime(2000);
-      expect(director.quiet).toBe(false);
-      vi.advanceTimersByTime(1001);
-      expect(director.quiet).toBe(true);
-    });
-  });
-
-  describe('沈黙が続いたら相方から話しかける', () => {
-    it('沈黙が続いた: 合図を 1 回送り、次の秒数を選び直す', () => {
-      let r = 0.5;
-      director = new Director({ gemini, speaker, memory, cfg, random: () => r }); // 25 + 0.5*20 = 35 秒
-      r = 1; // 次は 45 秒
-      vi.advanceTimersByTime(35_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(1);
-      expect(gemini.sendText.mock.calls[0][0]).toMatch(/^【合図】/);
-      expect(director.nextIdleSec).toBe(45);
-      // 応答が無くても、15 秒の応答待ちと 45 秒の沈黙を過ぎるまでは送らない
-      vi.advanceTimersByTime(44_000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(1);
-      vi.advanceTimersByTime(2000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(2);
-    });
-
-    it('自発発話を無効にしている: 長い沈黙でも送らない', () => {
-      make({ idleMinSec: 0 });
-      vi.advanceTimersByTime(600_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-    });
-
-    it('相方が喋り終えた時点から沈黙を数える', () => {
-      make();
-      vi.advanceTimersByTime(30_000);
-      speaker.emit('idle');
-      vi.advanceTimersByTime(30_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(6000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(1);
-    });
-
-    it('セッションが確立していなければ送らない', () => {
-      make();
-      gemini.ready = false;
-      vi.advanceTimersByTime(120_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('話しかける合図は話題を広げる内容にする', () => {
-    const idleTexts = (n, random) => {
-      director = new Director({ gemini, speaker, memory, cfg, random });
-      for (let i = 0; i < n; i++) vi.advanceTimersByTime(46_000);
-      return gemini.sendText.mock.calls.map((c) => c[0]);
-    };
-    const kindOf = (text) => IDLE_TOPICS.findIndex((t) => text.includes(t));
-
-    it('合図の内容: 話題の切り口と、具体的な質問か提案で締める指示が入っている', () => {
-      const [text] = idleTexts(1, () => 0.5);
-      expect(text).toMatch(/^【合図】/);
-      expect(kindOf(text)).toBeGreaterThanOrEqual(0);
-      expect(text).toContain(IDLE_CLOSING);
-      expect(IDLE_CLOSING).toMatch(/観察したこと、そこから立てた仮説、理解するための具体的な問い/);
-      expect(IDLE_CLOSING).toMatch(/直前の発言とは違う角度/);
-      expect(IDLE_TOPICS.length).toBeGreaterThanOrEqual(5);
-    });
-
-    it.each([
-      ['常に 0', () => 0],
-      ['常に 0.99', () => 0.99],
-      ['ばらばら', (() => { let s = 7; return () => ((s = (s * 9301 + 49297) % 233280) / 233280); })()],
-    ])('合図が続く（乱数が%s）: 隣り合う 2 回が同じ種類にならず、2 種類以上を使う', (_, random) => {
-      const all = idleTexts(10, random).map(kindOf);
-      expect(all.length).toBeGreaterThanOrEqual(10); // 沈黙の秒数は乱数で 25〜45 秒なので、10 回以上出る
-      const kinds = all.slice(0, 10);
-      expect(kinds.every((k) => k >= 0)).toBe(true);
-      for (let i = 1; i < kinds.length; i++) expect(kinds[i]).not.toBe(kinds[i - 1]);
-      expect(new Set(kinds).size).toBeGreaterThanOrEqual(2);
-    });
-  });
-
-  describe('チャットは場が空いたときにまとめて渡す', () => {
-    const chats = (n, from = 0) => Array.from({ length: n }, (_, i) => ({ author: `u${from + i}`, text: `c${from + i}` }));
-
-    it('チャットが 7 件溜まっている: 古い順に 5 件、次に 2 件を渡す', () => {
-      make();
-      director.addChat(chats(7));
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(1);
-      expect(gemini.sendText.mock.calls[0][0]).toBe('【チャット】\nu0: c0\nu1: c1\nu2: c2\nu3: c3\nu4: c4');
-      expect(memory.add).toHaveBeenCalledWith('チャット', 'u0: c0');
-      // 応答が届いて完了したら、次の 2 件
-      gemini.emit('modelText', 'ありがとう。');
-      gemini.emit('turnComplete');
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(2);
-      expect(gemini.sendText.mock.calls[1][0]).toBe('【チャット】\nu5: c5\nu6: c6');
-    });
-
-    it('チャットがあふれた: 最新の 20 件だけが残る', () => {
-      make();
-      director.addChat(chats(25));
-      expect(director.chatQueue).toHaveLength(20);
-      expect(director.chatQueue[0].author).toBe('u5');
-    });
-
-    it('チャットは沈黙時の合図より優先する', () => {
-      make();
-      vi.advanceTimersByTime(34_000);
-      director.addChat(chats(1));
-      vi.advanceTimersByTime(3000);
-      expect(gemini.sendText.mock.calls.map((c) => c[0].slice(0, 6))).toEqual(['【チャット】']);
-    });
-
-    it('送れなかったチャットはキューに残す', () => {
-      make();
-      gemini.sendText.mockReturnValueOnce(false);
-      director.addChat(chats(2));
-      vi.advanceTimersByTime(1000);
-      expect(director.chatQueue).toHaveLength(2);
-      expect(memory.add).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('セッションの張り直し直後に状態を戻す', () => {
-    it('応答の生成中に張り直した: 溜まった発言を回し、生成中で止まらない', () => {
-      make();
-      gemini.emit('modelText', '途中まで');
-      expect(director.quiet).toBe(false);
-      gemini.emit('open');
-      expect(pushed()).toEqual(['途中まで']);
-      expect(director.quiet).toBe(true);
-    });
-  });
-
-  describe('画面が未接続のときは自分から話しかけない', () => {
-    let audible;
-    const makeQuiet = () => {
-      audible = false;
-      director = new Director({ gemini, speaker, memory, cfg, random: () => 0.5, isAudible: () => audible });
-    };
-
-    it('画面をつなぐ前に長い沈黙が続く: 合図を送らない', () => {
-      makeQuiet();
-      vi.advanceTimersByTime(120_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-    });
-
-    it('画面をつなぐ前にチャットが届く: つながる前は渡さず、つながった後に渡す', () => {
-      makeQuiet();
-      director.addChat([{ author: 'a', text: 'b' }]);
-      vi.advanceTimersByTime(10_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-      audible = true;
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledWith('【チャット】\na: b');
-    });
-
-    it('画面をつなぐ前に配信者が話しかける: AI の発言はこれまでどおり読み上げに回す', () => {
-      makeQuiet();
-      gemini.emit('modelText', 'はい。');
-      expect(pushed()).toEqual(['はい。']);
-    });
-  });
-
-  describe('画面がつながった時点から沈黙を数える', () => {
-    it('長い待ちの後に画面をつなぐ: つながった時点から沈黙の秒数が経つまで合図を送らない', () => {
-      let audible = false;
-      director = new Director({ gemini, speaker, memory, cfg, random: () => 0.5, isAudible: () => audible }); // 35 秒
-      vi.advanceTimersByTime(300_000);
-      audible = true;
-      director.markActivity();
-      vi.advanceTimersByTime(35_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('自発発話を控えていることを記録する', () => {
-    it('未接続のまま時間が経つ: 控えるログと再開のログを 1 回ずつ記録する', async () => {
-      let audible = false;
-      director = new Director({ gemini, speaker, memory, cfg, isAudible: () => audible });
-      vi.advanceTimersByTime(60_000);
-      audible = true;
-      vi.advanceTimersByTime(5000);
-      vi.useRealTimers();
-      await new Promise((r) => setTimeout(r, 50));
-      const text = fs.readFileSync(logFilePath(), 'utf8');
-      expect(text.match(/画面が未接続のため、自分から話しかけるのを控えます/g)).toHaveLength(1);
-      expect(text.match(/画面がつながったので、自分から話しかけるのを再開します/g)).toHaveLength(1);
-    });
-  });
-
-  describe('一時停止', () => {
-    it('一時停止すると発話を止め、区切り前の発言を捨てる', () => {
-      make();
-      gemini.emit('modelText', '途中');
+  describe('一時停止中は問い合わせない', () => {
+    it('一時停止中に名前を呼ぶ: 召喚も問い合わせもせず、記録はする', () => {
+      const { director, responder, memory, speaker } = setup();
       director.setPaused(true);
       expect(speaker.stop).toHaveBeenCalled();
-      gemini.emit('turnComplete');
-      expect(pushed()).toEqual([]);
+      director.onUtterance('オルダ、聞こえる?');
+      director.addChat([{ author: 'Aさん', text: 'オルダ' }]);
+      expect(director.summoned).toBe(false);
+      expect(responder.ask).not.toHaveBeenCalled();
+      expect(memory.entries).toHaveLength(2);
     });
 
-    it('一時停止中に AI の発言が届く: 読み上げに回さない', () => {
-      make();
+    it('問い合わせ中に一時停止した: 届いた返事は読み上げない', async () => {
+      const { director, responder, speaker } = setup();
+      director.onUtterance('オルダ');
       director.setPaused(true);
-      gemini.emit('modelText', 'こんにちは。');
-      gemini.emit('open');
-      expect(pushed()).toEqual([]);
+      await responder.reply('はい。');
+      expect(speaker.pushed).toEqual([]);
     });
+  });
 
-    it('一時停止中にチャットが溜まる: 送らず、再開後に送る', () => {
-      make();
-      director.setPaused(true);
-      director.addChat([{ author: 'a', text: 'b' }]);
-      vi.advanceTimersByTime(60_000);
-      expect(gemini.sendText).not.toHaveBeenCalled();
-      director.setPaused(false);
-      vi.advanceTimersByTime(1000);
-      expect(gemini.sendText).toHaveBeenCalledWith('【チャット】\na: b');
+  describe('記録がたまったら要約する', () => {
+    it('返事の後に要約の要否を確かめる', async () => {
+      const { director, responder, memory } = setup();
+      const spy = vi.spyOn(memory, 'maybeSummarize');
+      director.onUtterance('オルダ');
+      await responder.reply('はい。');
+      expect(spy).toHaveBeenCalled();
     });
+  });
+});
+
+describe('文に区切る', () => {
+  it('区切り記号で区切り、区切り記号が連続しても 1 文、残りも 1 文', () => {
+    expect(splitSentences('えっ！？本当に')).toEqual(['えっ！？', '本当に']);
+    expect(splitSentences('一つ目。\n二つ目♪ ')).toEqual(['一つ目。\n', '二つ目♪']);
+  });
+
+  it('黙る合図: 前後の空白と句読点は無視し、文の一部なら合図ではない', () => {
+    expect(isSilentReply('スルー。')).toBe(true);
+    expect(isSilentReply(' スルー ')).toBe(true);
+    expect(isSilentReply('今回はスルーしましょう。')).toBe(false);
   });
 });

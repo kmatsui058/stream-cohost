@@ -1,7 +1,8 @@
 // OBS ブラウザソース用の HTTP + WebSocket サーバー。
 // - GET /                                → public/overlay.html（立ち絵または SOUND ONLY・字幕・音声再生）
 // - GET /character/{default,smile}.png → 立ち絵（CHARACTER_DIR から。素材は再配布禁止なのでリポジトリには置かない）
-// - WS → サーバー→画面: 接続時に {type:'profile', name, character}、{type:'say', id, text, wav(base64)}、{type:'stop'}
+// - WS → サーバー→画面: 接続時に {type:'profile', name, character, present}、{type:'say', id, text, wav(base64)}、{type:'stop'}、
+//        {type:'presence', visible}（召喚で表示、退去で非表示）
 //        画面→サーバー: {type:'ended', id}（再生完了の通知）
 import http from 'node:http';
 import fs from 'node:fs';
@@ -22,6 +23,13 @@ export class Overlay extends EventEmitter {
     this.displayName = displayName;
     this.characterDir = characterDir;
     this.clients = new Set();
+    this.present = false; // 相方を表示しているか（召喚中）
+  }
+
+  // 召喚・退去に合わせて、画面に相方を出す／消す
+  setPresence(visible) {
+    this.present = visible;
+    this.broadcast({ type: 'presence', visible });
   }
 
   // 立ち絵フォルダに default.png と smile.png の両方があるか
@@ -69,7 +77,7 @@ export class Overlay extends EventEmitter {
     wss.on('connection', (ws) => {
       this.clients.add(ws);
       log.info(`オーバーレイ接続 (計 ${this.clients.size})`);
-      ws.send(JSON.stringify({ type: 'profile', name: this.displayName, character: this.hasCharacter }));
+      ws.send(JSON.stringify({ type: 'profile', name: this.displayName, character: this.hasCharacter, present: this.present }));
       this.emit('connect');
       ws.on('message', (raw) => {
         try {

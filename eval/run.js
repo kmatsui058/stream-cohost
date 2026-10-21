@@ -16,7 +16,6 @@ import { execFileSync } from 'node:child_process';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { configureLogging } from '../src/log.js';
 import { loadConfig } from '../src/config.js';
-import { idlePromptText } from '../src/director.js';
 import { checkReply, summarize, CHECKS } from './checks.js';
 import { askText } from './ask-text.js';
 
@@ -30,7 +29,8 @@ const argOf = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : un
 const config = loadConfig();
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 const casesFile = argOf('--cases') ?? 'eval/cases.json';
-const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'));
+// 沈黙時の合図（type: idle）は廃止したので、そのケースは除く
+const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8')).filter((c) => c.type !== 'idle');
 const stream = JSON.parse(fs.readFileSync(argOf('--stream') ?? 'eval/stream.json', 'utf8'));
 const streamSection = `\n\n# 今日の配信\nタイトル: ${stream.title}\n概要欄:\n${stream.description}`;
 
@@ -53,7 +53,9 @@ const experiment = experimentFile
     };
 const variants = experiment.variants.map((v) => ({
   ...v,
-  model: v.model ?? config.gemini.model,
+  // 指定がなければ本番の答える役（テキストのモデル）で評価する
+  model: v.model ?? config.responder.model,
+  api: v.api ?? (v.model ? undefined : 'text'),
   instruction: loadPersona(v.persona) + streamSection,
 }));
 
@@ -120,7 +122,7 @@ async function ask(v, text, context) {
   }
 }
 
-const inputOf = (c) => (c.type === 'idle' ? idlePromptText(c.topic) : c.type === 'chat' ? `【チャット】\n${c.text}` : c.text);
+const inputOf = (c) => (c.type === 'chat' ? `【チャット】\n${c.text}` : c.text);
 
 // ケース × 条件 を、同時に CONCURRENCY 個ずつ実行する
 const jobs = cases.flatMap((c, ci) => variants.map((v, vi) => ({ c, ci, v, vi })));
@@ -172,7 +174,7 @@ for (const c of CHECKS) md += `| ${c.label} | ${sums.map((s) => s[c.key]).join('
 md += `\n## ケースごとの返事\n\n| ケース | 入力 | ${variants.map((v) => v.name).join(' | ')} |\n|---|---|${variants.map(() => '---').join('|')}|\n`;
 cases.forEach((c, i) => {
   const ctx = c.context?.length ? `（直前: ${c.context.join(' ／ ')}）<br>` : '';
-  const input = ctx + (c.type === 'idle' ? `（沈黙時の合図: 切り口 ${c.topic}）` : c.text) + `<br>正解: ${c.expect === 'silent' ? '黙る' : c.expect === 'speak' ? '話す' : 'どちらでも'}`;
+  const input = ctx + c.text + `<br>正解: ${c.expect === 'silent' ? '黙る' : c.expect === 'speak' ? '話す' : 'どちらでも'}`;
   const mark = (ok) => (ok === null ? '' : ok ? '✓ ' : '✗ ');
   const cells = replies[i].map((r, vi) => `${mark(checked[i][vi].expectOk)}${esc(r.text)}<br>⚑ ${flags(checked[i][vi])}（最初の文字 ${sec(r.firstMs)}）${r.signals.length ? `<br>🔎 ${r.signals.join(', ')}` : ''}${r.error ? `<br>失敗: ${r.error}` : ''}`);
   md += `| **${c.id}**<br>${c.note} | ${esc(input)} | ${cells.join(' | ')} |\n`;

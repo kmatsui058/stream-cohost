@@ -12,20 +12,19 @@
 
 | # | 操作 | 期待する結果 | 確認する仕様 |
 |---|---|---|---|
-| 1 | `npm start` | ログに `VOICEVOX ENGINE`、`接続完了`、`ffmpeg 起動`、`OBS に接続` が出る | operator-controls、live-session、audio-input、screen-capture |
-| 2 | OBS のブラウザソースを表示する | 左下に立ち絵（`default` の表情）と表示名が暗い状態で出て、左上に `cohost: 未接続` が出ない。`CHARACTER_DIR` が空なら「SOUND ONLY」が出る。ブラウザソースをつなぐ前は、自発発話が起きない（ログに `控えます`） | stream-overlay、turn-taking |
-| 3 | マイクに話しかける | ナースロボ＿タイプＴの声で返事が来て、字幕が出て、立ち絵が `smile` に変わり明るくなる。話し終わると `default` に戻り暗くなる | turn-taking、speech-output、stream-overlay |
-| 4 | 画面について聞く（例：「今の画面どう？」） | 映っているものに触れた返事が来る | screen-capture |
-| 5 | 相方が喋っている途中で話しかける | 相方が黙る（ログに `発話を中断`） | turn-taking |
-| 6 | 30〜45 秒黙る | ログに `【合図】` の注入が出て、相方から話しかけてくる | turn-taking |
-| 7 | コンソールで `r` | ログに `ローテーション開始`、`要約を更新`、`接続中 … 方式=新規` が出て、会話が続く | live-session、conversation-memory |
-| 8 | コンソールで `m` | 要約と直近の発言が表示される | operator-controls |
-| 9 | OBS で配信枠を選ぶ（または `v <動画ID>`） | ログに `OBS で選ばれている配信枠`・`今日の配信の情報を設定`・`チャット取得開始` が出て、コメントが来ると `💬` が出て、相方が名前を呼んで反応する | live-chat |
+| 1 | `npm start` | ログに `VOICEVOX ENGINE`、`[listener] 接続完了`、`ffmpeg 起動`、`OBS に接続` が出る | operator-controls、live-session、audio-input、screen-capture |
+| 2 | OBS のブラウザソースを表示する | 相方は表示されない（待機中）。左上に `cohost: 未接続` が出ない | stream-overlay |
+| 3 | 名前を呼ばずに話す | 何も起きない（`LOG_DEBUG=1` なら `🎤` だけ出る） | turn-taking、live-session |
+| 4 | 「オルダ、聞こえる?」と話しかける | ログに `召喚されました` が出て立ち絵が現れ、5〜10 秒ほどで返事が来て、字幕が出て、立ち絵が `smile` に変わり明るくなる | turn-taking、answering、speech-output、stream-overlay |
+| 5 | 名前を呼ばずに続けて質問する（例：「今の画面どう？」） | 召喚中なので返事が来て、映っているものに触れる | answering、screen-capture |
+| 6 | 相方が喋っている途中で話しかける | 相方が黙る（ログに `発話を中断`） | turn-taking |
+| 7 | 「ありがとう、もういいよ」と言う | 返事の後に立ち絵が消え、ログに `退去しました` が出る。その後、名前を呼ばない発話には返事が来ない | turn-taking、answering |
+| 8 | コンソールで `m`、続けて `r` | 要約と要約以降の記録が表示され、`r` で `要約を更新` が出る | operator-controls、conversation-memory |
+| 9 | OBS で配信枠を選ぶ（または `v <動画ID>`）。チャットで名前を呼ぶ | ログに `OBS で選ばれている配信枠`・`今日の配信の情報を設定`・`チャット取得開始` が出て、名前入りのコメントで召喚され、相方が名前を呼んで反応する | live-chat、turn-taking |
 | 10 | コンソールで `q` | ログに `終了します` が出て、プロセスが終わる | operator-controls |
-
 ## 実施記録
 
-### 2026-10-18（初回）
+### 2026-10-18（初回。召喚の仕組みにする前の手順で実施）
 
 - 実施した手順：1〜6
 - 結果：手順 3〜6 はすべて期待どおり。割り込みでの停止はログ上 2 回とも正しく動いた。コンテキストは 10 分で約 6,000 トークン。

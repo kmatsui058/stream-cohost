@@ -3,21 +3,23 @@ import { loadConfig, missingRequired } from '../src/config.js';
 
 const readPersona = (p) => `persona from ${p}`;
 
-describe('operator-controls / 設定の既定値', () => {
+describe('operator-controls / 設定の既定値を使う', () => {
   it('何も指定しない: 文書化された既定値が使われる', () => {
     const c = loadConfig({}, readPersona);
-    expect(c.gemini.model).toBe('gemini-3.8-live');
     expect(c.gemini.persona).toBe('persona from persona.md');
-    expect(c.gemini.silenceDurationMs).toBe(800);
-    expect(c.gemini.triggerTokens).toBe(32000);
-    expect(c.gemini.targetTokens).toBe(16000);
-    expect(c.memory).toEqual({ model: 'gemini-3.5-flash-lite', maxChars: 1500, recentEntries: 12, rotateAtTokens: 24000 });
+    expect(c.listener).toEqual({
+      model: 'gemini-3.5-transcribe-live',
+      silenceDurationMs: 800,
+      vocabulary: ['オルダ', 'ヴァール'],
+    });
+    expect(c.responder).toEqual({ model: 'gemini-4-argon', frames: 3, timeoutMs: 60000 });
+    expect(c.summonWords).toEqual(['オルダ', 'ヴァール']);
+    expect(c.memory).toEqual({ model: 'gemini-3.8-flash', maxChars: 4000, recentEntries: 12, summarizeAtChars: 12000 });
     expect(c.mic.ffmpeg).toBe('ffmpeg');
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
     expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
     expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR', characterDir: '' });
-    // 沈黙時に話しかける機能は既定で無効（話を広げるのは配信者が主導する）
-    expect(c.director).toEqual({ idleMinSec: 0, idleMaxSec: 45, bargeIn: true, gateMicWhileSpeaking: false });
+    expect(c.director).toEqual({ bargeIn: true, gateMicWhileSpeaking: false });
     expect(c.youtube.pollMinMs).toBe(10000);
   });
 
@@ -28,20 +30,24 @@ describe('operator-controls / 設定の既定値', () => {
   });
 
   it('数値と文字列の上書きが反映され、空文字は未指定として扱う', () => {
-    const c = loadConfig({ IDLE_MIN_SEC: '0', VOICEVOX_SPEAKER: '', PERSONA_FILE: 'x.md' }, readPersona);
-    expect(c.director.idleMinSec).toBe(0);
+    const c = loadConfig({ VAD_SILENCE_MS: '1200', VOICEVOX_SPEAKER: '', PERSONA_FILE: 'x.md' }, readPersona);
+    expect(c.listener.silenceDurationMs).toBe(1200);
     expect(c.voicevox.speaker).toBe(47);
     expect(c.gemini.persona).toBe('persona from x.md');
   });
-});
 
-describe('operator-controls / 設定の既定値（声と表示名）', () => {
   it('声と表示名の既定値: ナースロボ＿タイプＴ ノーマル（47）と ORÐA-VÁR', () => {
     const c = loadConfig({}, readPersona);
     expect(c.voicevox.speaker).toBe(47);
     expect(c.overlay.displayName).toBe('ORÐA-VÁR');
     expect(loadConfig({ COHOST_DISPLAY_NAME: 'ORDA' }, readPersona).overlay.displayName).toBe('ORDA');
     expect(loadConfig({ CHARACTER_DIR: 'C:\\chars' }, readPersona).overlay.characterDir).toBe('C:\\chars');
+  });
+
+  it('召喚の言葉を指定する: カンマ区切りで使われ、聞き取りやすくする語にも入る', () => {
+    const c = loadConfig({ SUMMON_WORDS: 'オルダ, ヴァール ,オルダちゃん', CUSTOM_VOCABULARY: 'ニブルヘイム,ソーサラー' }, readPersona);
+    expect(c.summonWords).toEqual(['オルダ', 'ヴァール', 'オルダちゃん']);
+    expect(c.listener.vocabulary).toEqual(['オルダ', 'ヴァール', 'オルダちゃん', 'ニブルヘイム', 'ソーサラー']);
   });
 });
 
