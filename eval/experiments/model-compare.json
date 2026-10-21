@@ -3,6 +3,7 @@
   "variants": [
     { "name": "A 3.8-live（本番）", "persona": "file:persona.md", "model": "gemini-3.8-live" },
     { "name": "B 3.8-live 思考あり", "persona": "file:persona.md", "model": "gemini-3.8-live-extended-thinking", "thinkingLevel": "HIGH" },
-    { "name": "C 3.8-flash（テキスト）", "persona": "file:persona.md", "model": "gemini-3.8-flash", "api": "text" }
+    { "name": "C 3.8-flash（テキスト）", "persona": "file:persona.md", "model": "gemini-3.8-flash", "api": "text" },
+    { "name": "D 4-argon（テキスト）", "persona": "file:persona.md", "model": "gemini-4-argon", "api": "text" }
   ]
 }
