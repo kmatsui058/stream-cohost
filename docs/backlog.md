@@ -19,5 +19,4 @@
 
 - persona（聞かれたことに答えるだけ・呼び方はマスター）を、実際の配信で確かめる
 - スモークテストの手順 9（チャット）を、実際の配信で実施して記録する
-- 終わった OpenSpec の変更をアーカイブする：character-display、idle-topics、carry-over-memory、stream-context、obs-broadcast-id、prompt-eval、speak-when-addressed、eval-search-tools
 - Google Drive の運用手順（ずんだもん、緑の丸、SOUND ONLY など古い記述がある）を、Google Docs のコネクタが使えるようになったら更新する
