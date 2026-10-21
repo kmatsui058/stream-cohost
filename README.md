@@ -114,7 +114,7 @@
 
 - Node.js 22（既存）
 - ffmpeg 9.0（`winget install Gyan.FFmpeg.Essentials`）※ **PATH が通るのは、新しく開いたターミナルから**。VS Code ごと再起動するのが確実。
-- VOICEVOX 0.25.2（`winget install HiroshibaKazuyuki.VOICEVOX`）。DirectML 版なので Radeon でも GPU で合成できる。**配信中は VOICEVOX アプリを起動しておく**こと（アプリが ENGINE を `:50021` で立てる）。
+- VOICEVOX 0.25.2（`winget install HiroshibaKazuyuki.VOICEVOX`）。DirectML 版なので Radeon でも GPU で合成できる。`npm start` で VOICEVOX アプリも一緒に起動する（アプリが ENGINE を `:50021` で立てる。すでに起動していれば二重には起動しない）。立ち上がる前に接続を確認するので、起動直後に「VOICEVOX に接続できません」が出ることがあるが、立ち上がれば読み上げは動く。
 - npm パッケージ：`@google/genai`、`obs-websocket-js`、`ws`
 
 ### 4.2 音声の経路（前提）
