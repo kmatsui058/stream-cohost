@@ -1,7 +1,8 @@
 // 配信に重ねる画面のロジック。ブラウザ（OBS のブラウザソース）で動き、テストでは偽物を渡して動かす。
 //
 // サーバーから {type:'say', id, text, wav(base64)} を受けたら再生し、終わったら {type:'ended', id} を返す。
-// {type:'stop'} で再生中の音声を止める。{type:'profile', name, character} で表示名と立ち絵の有無を受け取る。
+// {type:'stop'} で再生中の音声を止める。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
+// {type:'presence', visible} で相方を出す／消す（root の present クラス → CSS で表示を切り替え）。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
 export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
@@ -117,7 +118,9 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       if (m.type === 'profile') {
         el.name.textContent = m.name ?? '';
         el.root.classList.toggle('has-character', !!m.character);
+        el.root.classList.toggle('present', !!m.present);
       }
+      if (m.type === 'presence') el.root.classList.toggle('present', !!m.visible);
     };
     // サーバー未起動・再起動時は赤字で表示して再接続（配信に映るのが嫌なら #status を消してよい）
     ws.onclose = () => {

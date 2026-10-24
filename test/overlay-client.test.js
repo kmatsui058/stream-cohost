@@ -40,6 +40,21 @@ describe('stream-overlay（画面側）', () => {
     });
   });
 
+  describe('召喚中だけ相方を表示する', () => {
+    it('召喚と退去: 表示の指示で present が付き、非表示の指示で外れる', () => {
+      expect(el.root.classList.contains('present')).toBe(false);
+      sockets.last().receive({ type: 'presence', visible: true });
+      expect(el.root.classList.contains('present')).toBe(true);
+      sockets.last().receive({ type: 'presence', visible: false });
+      expect(el.root.classList.contains('present')).toBe(false);
+    });
+
+    it('召喚中に画面が接続する: 接続時の情報で表示する', () => {
+      sockets.last().receive({ type: 'profile', name: 'ORÐA-VÁR', character: true, present: true });
+      expect(el.root.classList.contains('present')).toBe(true);
+    });
+  });
+
   describe('立ち絵がないときの SOUND ONLY 表示', () => {
     it('立ち絵フォルダを設定していない: 起動直後は SOUND ONLY が暗い状態', () => {
       expect(el.root.classList.contains('has-character')).toBe(false);

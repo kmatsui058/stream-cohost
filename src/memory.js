@@ -1,9 +1,10 @@
-// 会話の記憶: 書き起こしを溜め、Live セッションを張り直すたびに「要約 + 直近の数往復」へ圧縮する。
+// 会話の記憶: 発話・返事・チャットを記録し、たまったら古い部分を要約に畳み込む。
 //
-//   [persona.md] + [これまでの要約 (≦ SUMMARY_MAX_CHARS)] + [直近 RECENT_ENTRIES 件の発言そのまま]
+//   指示 = [persona.md] + [今日の配信] + [前回の配信] + [ここまでの要約 (≦ SUMMARY_MAX_CHARS)]
+//   記録 = 要約以降の発言すべて（「話者: 発言」）
 //
-// を新しいセッションの systemInstruction にすることで、コンテキストの大きさを一定に保つ。
-// 要約は別のテキストモデル（既定 gemini-3.5-flash-lite）で作る。中身は logs/summary.txt で確認できる。
+// を答える役への問い合わせに使う。要約していない記録が SUMMARIZE_AT_CHARS を超えたら、
+// 直近 RECENT_ENTRIES 件を残して要約する。要約は別のモデル（既定 gemini-3.8-flash）で作り、logs/summary.txt で確認できる。
 import fs from 'node:fs';
 import path from 'node:path';
 import { logger } from './log.js';
@@ -14,7 +15,7 @@ const STREAM_DESCRIPTION_MAX = 1000;
 
 export class Memory {
   constructor({
-    ai, model, maxChars, recentEntries, persona,
+    ai, model, maxChars, recentEntries, persona, summarizeAtChars = 12000,
     summaryFile = path.resolve('logs', 'summary.txt'),
     stateFile = path.resolve('logs', 'carryover.json'), // 配信をまたいで引き継ぐ記憶
   }) {
@@ -22,6 +23,7 @@ export class Memory {
     this.model = model;
     this.maxChars = maxChars;
     this.recentEntries = recentEntries;
+    this.summarizeAtChars = summarizeAtChars;
     this.persona = persona;
     this.summaryFile = summaryFile;
     this.stateFile = stateFile;
@@ -32,13 +34,21 @@ export class Memory {
     this.summarizing = null;
   }
 
-  // 文字起こしは細切れで届くので、同じ話者が続く間は 1 件にまとめる。
-  // ただし要約の対象になった発言（sealed）には結合しない（要約後に一緒に消えてしまうため）
+  // 発話・返事・チャットを 1 件ずつ記録する
   add(role, text) {
     if (!text) return;
-    const last = this.entries.at(-1);
-    if (last && last.role === role && role !== 'チャット' && !last.sealed) last.text += text;
-    else this.entries.push({ role, text });
+    this.entries.push({ role, text });
+  }
+
+  // 要約していない記録の文字数
+  get pendingChars() {
+    return this.entries.reduce((n, e) => n + (e.sealed ? 0 : e.text.length), 0);
+  }
+
+  // 記録がたまっていたら要約する（結果は待たない。失敗は警告に残す）
+  maybeSummarize() {
+    if (this.summarizing || this.pendingChars <= this.summarizeAtChars) return;
+    this.summarize().catch((e) => log.warn(`要約に失敗しました。次の機会に再試行します: ${e.message}`));
   }
 
   format(entries) {
@@ -49,9 +59,15 @@ export class Memory {
     return `あなたはライブ配信の記録係です。「これまでの要約」と「新しい書き起こし」をもとに、要約を更新してください。
 
 # ルール
-- 日本語で ${this.maxChars} 文字以内。箇条書きでよい
-- 残すもの: 配信で今やっていること、話題の流れ、配信者が話した事実・好み・予定、相方との約束や持ちネタ、何度も来ているチャット参加者の名前と特徴
-- 捨てるもの: 相づち、挨拶の繰り返し、細かい言い回し
+- 日本語で ${this.maxChars} 文字以内。見出しと箇条書きで整理する。字数に余裕があれば、細部を省かずに残す
+- 残すもの:
+  - 配信で今やっていることと、ここまでの流れ（どこで何をして、何が起きたか）
+  - 配信者が読み上げた物語やセリフの要点（登場人物、出来事、固有名詞）
+  - 配信者が話した事実・好み・予定・感想
+  - 配信者や視聴者が教えてくれたこと、訂正されたこと（相方の誤りが訂正された場合は、正しい内容を残す）
+  - 相方が聞かれて答えた内容
+  - 常連の視聴者の名前と特徴
+- 捨てるもの: 相づち、挨拶の繰り返し、言い淀み、同じ内容の繰り返し
 - 書き起こしは自動音声認識なので誤字がある。文脈から補ってよいが、推測で事実を作らない
 - 要約本文だけを出力する
 
@@ -146,20 +162,18 @@ ${this.format(old)}`;
     return true;
   }
 
-  // 新しいセッションに渡すシステムプロンプト
+  // 答える役への指示: ペルソナ → 今日の配信 → 前回の配信 → ここまでの要約
   instruction() {
-    const prev =
+    return (
+      this.persona +
       (this.streamInfo ? `\n\n# 今日の配信\n${this.streamInfo}` : '') +
-      (this.previous ? `\n\n# 前回の配信の要約\n${this.previous}` : '');
-    if (!this.summary && !this.entries.length) return this.persona + prev;
-    return `${this.persona}${prev}
+      (this.previous ? `\n\n# 前回の配信の要約\n${this.previous}` : '') +
+      (this.summary ? `\n\n# ここまでの配信の要約\n${this.summary}` : '')
+    );
+  }
 
-# これまでの配信の流れ（要約）
-${this.summary || '（まだなし）'}
-
-# 直前のやり取り
-${this.format(this.entries) || '（なし）'}
-
-上の続きから自然に会話を続けてください。接続が切り替わったことや、この要約の存在には触れないでください。`;
+  // 要約以降の記録
+  transcript() {
+    return this.format(this.entries);
   }
 }

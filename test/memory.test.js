@@ -14,21 +14,22 @@ describe('conversation-memory', () => {
   beforeEach(() => {
     summaryFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-mem-')), 'summary.txt');
   });
-  const make = (ai, recentEntries = 12) =>
-    new Memory({ ai, model: 'flash-lite', maxChars: 1500, recentEntries, persona: 'PERSONA', summaryFile, stateFile: path.join(path.dirname(summaryFile), 'state.json') });
+  const make = (ai, recentEntries = 12, summarizeAtChars = 12000) =>
+    new Memory({ ai, model: 'flash', maxChars: 4000, recentEntries, summarizeAtChars, persona: 'PERSONA', summaryFile, stateFile: path.join(path.dirname(summaryFile), 'state.json') });
   const fill = (mem, n) => {
     for (let i = 0; i < n; i++) mem.add(i % 2 ? '相方' : '配信者', `発言${i}`);
   };
 
-  describe('会話を話者ごとに記録する', () => {
-    it('細切れの文字起こし: 同じ話者は 1 件にまとまる', () => {
+  describe('発言を 1 件ずつ記録する', () => {
+    it('発話と返事: 同じ話者が続いても 1 件ずつ、この順に記録される', () => {
       const mem = make(fakeAi());
       mem.add('配信者', 'ボス');
       mem.add('配信者', '強すぎ');
-      mem.add('相方', 'もう3回目だね。');
+      mem.add('相方', 'もう3回目ですね。');
       expect(mem.entries.map(({ role, text }) => ({ role, text }))).toEqual([
-        { role: '配信者', text: 'ボス強すぎ' },
-        { role: '相方', text: 'もう3回目だね。' },
+        { role: '配信者', text: 'ボス' },
+        { role: '配信者', text: '強すぎ' },
+        { role: '相方', text: 'もう3回目ですね。' },
       ]);
     });
 
@@ -54,7 +55,7 @@ describe('conversation-memory', () => {
       fill(mem, 14);
       await mem.summarize();
       const prompt = ai.models.generateContent.mock.calls[0][0].contents;
-      expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash-lite');
+      expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash');
       expect(prompt).toContain('前回の要約');
       expect(prompt).toContain('配信者: 発言0\n相方: 発言1');
       expect(prompt).not.toContain('発言2');
@@ -78,7 +79,7 @@ describe('conversation-memory', () => {
       const mem = make(ai, recent);
       fill(mem, 14); // 最後は「相方: 発言13」
       const p = mem.summarize();
-      mem.add('相方', '（続き）'); // 直前と同じ話者
+      mem.add('相方', '（続き）');
       mem.add('配信者', '新しい話');
       release({ text: '要約' });
       await p;
@@ -89,15 +90,16 @@ describe('conversation-memory', () => {
   });
 
   describe('要約の作り方', () => {
-    it('文字数の上限と、残すもの・捨てるものを指示する', async () => {
+    it('要約を求める: 設定したモデルに、文字数の上限と、残すもの・捨てるものを指示する', async () => {
       const ai = fakeAi();
       const mem = make(ai, 0);
       fill(mem, 1);
       await mem.summarize();
       const prompt = ai.models.generateContent.mock.calls[0][0].contents;
-      expect(prompt).toContain('1500 文字以内');
-      expect(prompt).toMatch(/残すもの:.*配信で今やっていること.*配信者が話した事実.*約束.*チャット参加者/);
-      expect(prompt).toMatch(/捨てるもの:.*相づち.*挨拶の繰り返し/);
+      expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash');
+      expect(prompt).toContain('4000 文字以内');
+      expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方[\s\S]*常連/);
+      expect(prompt).toMatch(/捨てるもの[\s\S]*相づち[\s\S]*挨拶の繰り返し[\s\S]*言い淀み/);
     });
 
     it('要約が空で返った: 失敗とし、記録と前回の要約を変えない', async () => {
@@ -107,9 +109,6 @@ describe('conversation-memory', () => {
       await expect(mem.summarize()).rejects.toThrow(/空/);
       expect(mem.summary).toBe('前回');
       expect(mem.entries).toHaveLength(3);
-      // 失敗後は、また同じ話者の発言を結合できる
-      mem.add('配信者', '追記');
-      expect(mem.entries.at(-1).text).toBe('発言2追記');
     });
 
     it('API がエラー: 失敗を伝え、記録を変えない', async () => {
@@ -136,12 +135,47 @@ describe('conversation-memory', () => {
     });
   });
 
-  describe('新しいセッションへの指示を組み立てる', () => {
-    it('配信開始直後: ペルソナだけを返す', () => {
-      expect(make(fakeAi()).instruction()).toBe('PERSONA');
+  describe('たまったら要約する', () => {
+    it('記録が 12,000 文字を超える: 要約を 1 回作る（作成中に重ねて作らない）', async () => {
+      const ai = fakeAi('要約');
+      const mem = make(ai, 0, 100);
+      mem.add('配信者', 'あ'.repeat(60));
+      mem.maybeSummarize();
+      expect(ai.models.generateContent).not.toHaveBeenCalled();
+      mem.add('配信者', 'い'.repeat(60));
+      mem.maybeSummarize();
+      mem.maybeSummarize();
+      await mem.summarizing;
+      expect(ai.models.generateContent).toHaveBeenCalledTimes(1);
+      expect(mem.entries).toHaveLength(0);
     });
 
-    it('要約と直近の発言がある: ペルソナ → 要約 → 直近の順に並べ、張り直しに触れないよう指示する', async () => {
+    it('記録が少ない: 要約しない', () => {
+      const ai = fakeAi();
+      const mem = make(ai, 0);
+      fill(mem, 20);
+      mem.maybeSummarize();
+      expect(ai.models.generateContent).not.toHaveBeenCalled();
+    });
+
+    it('要約に失敗しても例外を投げず、警告を記録する', async () => {
+      const ai = { models: { generateContent: vi.fn().mockRejectedValue(new Error('503')) } };
+      const mem = make(ai, 0, 1);
+      fill(mem, 2);
+      mem.maybeSummarize();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/WARN .*要約に失敗/);
+    });
+  });
+
+  describe('問い合わせの材料を組み立てる', () => {
+    it('配信開始直後: 指示はペルソナだけ、記録は空', () => {
+      const mem = make(fakeAi());
+      expect(mem.instruction()).toBe('PERSONA');
+      expect(mem.transcript()).toBe('');
+    });
+
+    it('要約と記録がある: 指示はペルソナ → 要約、記録は要約以降の発言を「話者: 発言」で並べる', async () => {
       const mem = make(fakeAi('- ボス戦中'), 2);
       mem.add('配信者', '古い話');
       mem.add('チャット', 'Aさん: がんばれ');
@@ -149,10 +183,9 @@ describe('conversation-memory', () => {
       await mem.summarize();
       const inst = mem.instruction();
       expect(inst.indexOf('PERSONA')).toBe(0);
-      expect(inst.indexOf('- ボス戦中')).toBeGreaterThan(0);
-      expect(inst.indexOf('チャット: Aさん: がんばれ\nチャット: Bさん: 草')).toBeGreaterThan(inst.indexOf('- ボス戦中'));
-      expect(inst).toContain('接続が切り替わったことや、この要約の存在には触れないでください');
-      expect(inst).not.toContain('古い話');
+      expect(inst).toMatch(/# ここまでの配信の要約\n- ボス戦中/);
+      expect(inst).not.toContain('がんばれ');
+      expect(mem.transcript()).toBe('チャット: Aさん: がんばれ\nチャット: Bさん: 草');
     });
   });
 
