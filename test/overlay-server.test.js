@@ -127,15 +127,15 @@ describe('stream-overlay（サーバー側）', () => {
     };
 
     it('表示名と立ち絵の有無 / 立ち絵ありで画面が接続する: 表示名と「立ち絵あり」を送る', async () => {
-      expect(await profileOf(charDir(['default.png', 'smile.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: true, present: false, thinkingFace: false, thinking: false });
+      expect(await profileOf(charDir(['default.png', 'smile.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: true, present: false, thinkingFaces: { summon: false, ask: false }, thinking: false, thinkingSummon: false, summonOpacity: 1 });
     });
 
     it('表示名と立ち絵の有無 / 立ち絵が片方しかない: 「立ち絵なし」を送る', async () => {
-      expect(await profileOf(charDir(['default.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false, thinkingFace: false, thinking: false });
+      expect(await profileOf(charDir(['default.png']))).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false, thinkingFaces: { summon: false, ask: false }, thinking: false, thinkingSummon: false, summonOpacity: 1 });
     });
 
     it('表示名と立ち絵の有無 / 立ち絵フォルダが未設定: 「立ち絵なし」を送る', async () => {
-      expect(await profileOf('')).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false, thinkingFace: false, thinking: false });
+      expect(await profileOf('')).toEqual({ type: 'profile', name: 'ORÐA-VÁR', character: false, present: false, thinkingFaces: { summon: false, ask: false }, thinking: false, thinkingSummon: false, summonOpacity: 1 });
     });
 
     it('召喚中だけ相方を表示する / 召喚と退去: 表示と非表示の指示を届ける', async () => {
@@ -158,20 +158,23 @@ describe('stream-overlay（サーバー側）', () => {
       expect(ws.received[0]).toMatchObject({ type: 'profile', present: true });
     });
 
-    it('考え中の画像を配信する: misterious.png を返し、接続時に有無と考え中かを送る。考え中の指示を届ける', async () => {
-      overlay = new Overlay({ port: 0, displayName: 'ORÐA-VÁR', characterDir: charDir(['default.png', 'smile.png', 'misterious.png']) });
+    it('考え中の画像を配信する: huse.png と guruguru.png を返し、接続時に有無と考え中かを送る。考え中の指示を届ける', async () => {
+      overlay = new Overlay({ port: 0, displayName: 'ORÐA-VÁR', characterDir: charDir(['default.png', 'smile.png', 'huse.png', 'guruguru.png']) });
       const port = await overlay.start();
-      const r = await get(port, '/character/misterious.png');
-      expect(r.status).toBe(200);
-      expect(r.body).toBe('PNG:misterious.png');
-      overlay.setThinking(true);
+      for (const name of ['huse.png', 'guruguru.png']) {
+        const r = await get(port, `/character/${name}`);
+        expect(r.status).toBe(200);
+        expect(r.body).toBe(`PNG:${name}`);
+      }
+      expect((await get(port, '/character/misterious.png')).status).toBe(404);
+      overlay.setThinking(true, true);
       const ws = await open(port);
       sockets.push(ws);
       await until(() => ws.received.length === 1);
-      expect(ws.received[0]).toMatchObject({ type: 'profile', thinkingFace: true, thinking: true });
-      overlay.setThinking(false);
+      expect(ws.received[0]).toMatchObject({ type: 'profile', thinkingFaces: { summon: true, ask: true }, thinking: true, thinkingSummon: true });
+      overlay.setThinking(false, false);
       await until(() => ws.received.length === 2);
-      expect(ws.received[1]).toEqual({ type: 'thinking', on: false });
+      expect(ws.received[1]).toEqual({ type: 'thinking', on: false, summon: false });
     });
 
     it('立ち絵の画像を配信する / 立ち絵を取得する: フォルダ内の smile.png を返す', async () => {

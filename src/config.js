@@ -75,6 +75,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       displayName: env.COHOST_DISPLAY_NAME || 'ORÐA-VÁR',
       // 立ち絵フォルダ（default.png と smile.png）。空なら SOUND ONLY 表示
       characterDir: env.CHARACTER_DIR || '',
+      // 召喚直後（最初に喋るまで）の相方の不透明度。1 なら最初からはっきり表示する
+      summonOpacity: num('SUMMON_OPACITY', 1),
     },
     director: {
       // 相方が喋っている間に配信者が話したとき: duck = 声を小さくする / stop = 中断する / off = 何もしない

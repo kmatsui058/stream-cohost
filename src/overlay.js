@@ -2,7 +2,7 @@
 // - GET /                                → public/overlay.html（立ち絵または SOUND ONLY・字幕・音声再生）
 // - GET /character/{default,smile}.png → 立ち絵（CHARACTER_DIR から。素材は再配布禁止なのでリポジトリには置かない）
 // - WS → サーバー→画面: 接続時に {type:'profile', name, character, present}、{type:'say', id, text, wav(base64)}、{type:'stop'}、
-//        {type:'presence', visible}（召喚で表示、退去で非表示）、{type:'thinking', on}（考え中）
+//        {type:'presence', visible}（召喚で表示、退去で非表示）、{type:'thinking', on, summon}（考え中。summon は召喚直後の問い合わせか）
 //        画面→サーバー: {type:'ended', id}（再生完了の通知）
 import http from 'node:http';
 import fs from 'node:fs';
@@ -15,28 +15,33 @@ const log = logger('overlay');
 const PUBLIC = path.resolve('public');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.png': 'image/png', '.js': 'text/javascript', '.css': 'text/css' };
 const CHARACTER_FILES = ['default.png', 'smile.png'];
-const THINKING_FILE = 'misterious.png'; // 考え中の表情（なくてもよい）
+// 考え中の表情（なくてもよい）: 召喚直後の問い合わせ中と、それ以降の問い合わせ中
+const THINKING_FILES = { summon: 'huse.png', ask: 'guruguru.png' };
 
 export class Overlay extends EventEmitter {
-  constructor({ port, displayName = '', characterDir = '' }) {
+  constructor({ port, displayName = '', characterDir = '', summonOpacity = 1 }) {
     super();
     this.port = port;
     this.displayName = displayName;
     this.characterDir = characterDir;
+    this.summonOpacity = summonOpacity;
     this.clients = new Set();
     this.present = false; // 相方を表示しているか（召喚中）
     this.thinking = false; // 考え中（答える役に問い合わせ中）か
+    this.thinkingSummon = false; // 召喚直後の問い合わせ中か
   }
 
-  // 考え中の画像があるか
-  get hasThinkingFace() {
-    return this.hasCharacter && fs.existsSync(path.join(this.characterDir, THINKING_FILE));
+  // 考え中の画像がそれぞれあるか
+  get thinkingFaces() {
+    const has = (f) => this.hasCharacter && fs.existsSync(path.join(this.characterDir, f));
+    return { summon: has(THINKING_FILES.summon), ask: has(THINKING_FILES.ask) };
   }
 
   // 問い合わせ中は、画面に考え中の表情と「…」を出す
-  setThinking(on) {
+  setThinking(on, summon = false) {
     this.thinking = on;
-    this.broadcast({ type: 'thinking', on });
+    this.thinkingSummon = summon;
+    this.broadcast({ type: 'thinking', on, summon });
   }
 
   // 召喚・退去に合わせて、画面に相方を出す／消す
@@ -61,7 +66,7 @@ export class Overlay extends EventEmitter {
     // 立ち絵は決まった 2 つのファイル名だけを、立ち絵フォルダから返す（名前の照合なので外には出られない）
     if (urlPath.startsWith('/character/')) {
       const name = urlPath.slice('/character/'.length);
-      if (!this.characterDir || ![...CHARACTER_FILES, THINKING_FILE].includes(name)) return null;
+      if (!this.characterDir || ![...CHARACTER_FILES, ...Object.values(THINKING_FILES)].includes(name)) return null;
       const file = path.join(this.characterDir, name);
       return fs.existsSync(file) ? file : null;
     }
@@ -90,7 +95,7 @@ export class Overlay extends EventEmitter {
     wss.on('connection', (ws) => {
       this.clients.add(ws);
       log.info(`オーバーレイ接続 (計 ${this.clients.size})`);
-      ws.send(JSON.stringify({ type: 'profile', name: this.displayName, character: this.hasCharacter, present: this.present, thinkingFace: this.hasThinkingFace, thinking: this.thinking }));
+      ws.send(JSON.stringify({ type: 'profile', name: this.displayName, character: this.hasCharacter, present: this.present, thinkingFaces: this.thinkingFaces, thinking: this.thinking, thinkingSummon: this.thinkingSummon, summonOpacity: this.summonOpacity }));
       this.emit('connect');
       ws.on('message', (raw) => {
         try {

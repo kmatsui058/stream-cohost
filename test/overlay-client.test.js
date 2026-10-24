@@ -45,10 +45,14 @@ describe('stream-overlay（画面側）', () => {
     const thinkingClass = () => el.root.classList.contains('thinking');
 
     it('考え中になって返事が届く: 考え中の表情と「…」を出し、終わると戻す', () => {
-      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFace: true });
-      sockets.last().receive({ type: 'thinking', on: true });
+      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFaces: { summon: true, ask: true } });
+      sockets.last().receive({ type: 'thinking', on: true, summon: true });
       expect(thinkingClass()).toBe(true);
-      expect(el.root.classList.contains('has-thinking-face')).toBe(true);
+      expect(el.root.classList.contains('thinking-summon')).toBe(true);
+      expect(el.root.classList.contains('has-face-summon')).toBe(true);
+      expect(el.root.classList.contains('has-face-ask')).toBe(true);
+      sockets.last().receive({ type: 'thinking', on: true, summon: false });
+      expect(el.root.classList.contains('thinking-summon')).toBe(false);
       expect(loading()).toBe(true);
       sockets.last().receive({ type: 'thinking', on: false });
       expect(thinkingClass()).toBe(false);
@@ -72,8 +76,9 @@ describe('stream-overlay（画面側）', () => {
     });
 
     it('考え中の画像がない: 表情用の印は付けず、「…」だけ出す', () => {
-      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFace: false, thinking: true });
-      expect(el.root.classList.contains('has-thinking-face')).toBe(false);
+      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFaces: { summon: false, ask: false }, thinking: true });
+      expect(el.root.classList.contains('has-face-summon')).toBe(false);
+      expect(el.root.classList.contains('has-face-ask')).toBe(false);
       expect(loading()).toBe(true);
     });
   });
@@ -97,6 +102,13 @@ describe('stream-overlay（画面側）', () => {
     });
 
     const awake = () => el.root.classList.contains('awake');
+
+    it('召喚直後の不透明度: 接続時の設定を --summon-opacity に入れる（既定 1）', () => {
+      sockets.last().receive({ type: 'profile', name: 'x', character: true });
+      expect(el.root.style.props['--summon-opacity']).toBe('1');
+      sockets.last().receive({ type: 'profile', name: 'x', character: true, summonOpacity: 0.3 });
+      expect(el.root.style.props['--summon-opacity']).toBe('0.3');
+    });
 
     it('召喚されてから話し始める: 召喚直後は awake なし（0.3）、音声の再生を始めるときに awake が付く（1）', async () => {
       sockets.last().receive({ type: 'presence', visible: true });

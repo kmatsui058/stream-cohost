@@ -4,7 +4,7 @@
 // {type:'stop'} で再生中の音声を止める。{type:'volume', level} で再生音量をなめらかに変える。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
 // {type:'presence', visible} で相方を出す／消す（root の present クラス → CSS で表示を切り替え）。
 // 召喚直後は薄く出し、最初の音声を再生する直前に root に awake を付けてはっきりさせる（退去まで付けたまま）。
-// {type:'thinking', on} の間は root に thinking を付け（考え中の表情）、再生中でなければ字幕の位置に「…」を出す。
+// {type:'thinking', on, summon} の間は root に thinking（召喚直後なら thinking-summon も）を付け（考え中の表情）、再生中でなければ字幕の位置に「…」を出す。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
 export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
@@ -122,9 +122,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
     }
   }
 
-  function setThinking(on) {
+  function setThinking(on, summon) {
     thinking = on;
     el.root.classList.toggle('thinking', on);
+    el.root.classList.toggle('thinking-summon', on && summon);
     updateLoading();
   }
 
@@ -145,10 +146,12 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
         el.name.textContent = m.name ?? '';
         el.root.classList.toggle('has-character', !!m.character);
         el.root.classList.toggle('present', !!m.present);
-        el.root.classList.toggle('has-thinking-face', !!m.thinkingFace);
-        setThinking(!!m.thinking);
+        el.root.style.setProperty('--summon-opacity', String(m.summonOpacity ?? 1));
+        el.root.classList.toggle('has-face-summon', !!m.thinkingFaces?.summon);
+        el.root.classList.toggle('has-face-ask', !!m.thinkingFaces?.ask);
+        setThinking(!!m.thinking, !!m.thinkingSummon);
       }
-      if (m.type === 'thinking') setThinking(!!m.on);
+      if (m.type === 'thinking') setThinking(!!m.on, !!m.summon);
       if (m.type === 'presence') {
         el.root.classList.toggle('present', !!m.visible);
         el.root.classList.remove('awake'); // 召喚し直したら、また薄い表示から始める
