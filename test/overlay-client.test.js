@@ -49,6 +49,33 @@ describe('stream-overlay（画面側）', () => {
       expect(el.root.classList.contains('present')).toBe(false);
     });
 
+    const awake = () => el.root.classList.contains('awake');
+
+    it('召喚されてから話し始める: 召喚直後は awake なし（0.3）、音声の再生を始めるときに awake が付く（1）', async () => {
+      sockets.last().receive({ type: 'presence', visible: true });
+      expect(awake()).toBe(false);
+      const p = play(1, 'はい。');
+      expect(awake()).toBe(false); // まだ再生を始めていない
+      await p;
+      expect(ctx.sources[0].started).toBe(true);
+      expect(awake()).toBe(true);
+    });
+
+    it('話し終わって次の質問を待つ: 退去するまで awake のまま', async () => {
+      sockets.last().receive({ type: 'presence', visible: true });
+      await play(1, 'はい。');
+      ctx.sources[0].onended();
+      expect(awake()).toBe(true);
+    });
+
+    it('もう一度召喚される: また awake なしから始まる', async () => {
+      sockets.last().receive({ type: 'presence', visible: true });
+      await play(1, 'はい。');
+      sockets.last().receive({ type: 'presence', visible: false });
+      sockets.last().receive({ type: 'presence', visible: true });
+      expect(awake()).toBe(false);
+    });
+
     it('召喚中に画面が接続する: 接続時の情報で表示する', () => {
       sockets.last().receive({ type: 'profile', name: 'ORÐA-VÁR', character: true, present: true });
       expect(el.root.classList.contains('present')).toBe(true);
