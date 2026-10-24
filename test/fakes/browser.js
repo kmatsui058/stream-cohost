@@ -7,6 +7,8 @@ export function fakeAudioContext() {
     level: 0, // 再生音量（getFloatTimeDomainData が返すサンプル値）
     failDecode: false,
     sources: [],
+    gains: [],
+    currentTime: 0,
     resume: async () => {
       ctx.state = 'running';
     },
@@ -15,6 +17,11 @@ export function fakeAudioContext() {
       connect() {},
       getFloatTimeDomainData: (arr) => arr.fill(ctx.level),
     }),
+    createGain: () => {
+      const g = { connect() {}, gain: { value: 1, target: 1, setTargetAtTime(v) { g.gain.target = v; } } };
+      ctx.gains.push(g);
+      return g;
+    },
     decodeAudioData: async (buf) => {
       if (ctx.failDecode) throw new Error('EncodingError: Unable to decode audio data');
       return { byteLength: buf.byteLength };

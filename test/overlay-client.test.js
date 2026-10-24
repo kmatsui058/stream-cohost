@@ -40,6 +40,15 @@ describe('stream-overlay（画面側）', () => {
     });
   });
 
+  describe('再生音量を変える', () => {
+    it('音量の指示を受ける: 再生音量が 0.3 に向かって変わり、1 で戻る', () => {
+      sockets.last().receive({ type: 'volume', level: 0.3 });
+      expect(ctx.gains[0].gain.target).toBe(0.3);
+      sockets.last().receive({ type: 'volume', level: 1 });
+      expect(ctx.gains[0].gain.target).toBe(1);
+    });
+  });
+
   describe('召喚中だけ相方を表示する', () => {
     it('召喚と退去: 表示の指示で present が付き、非表示の指示で外れる', () => {
       expect(el.root.classList.contains('present')).toBe(false);

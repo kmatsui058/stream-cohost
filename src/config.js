@@ -64,8 +64,11 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       characterDir: env.CHARACTER_DIR || '',
     },
     director: {
-      // 自分の声が届いたら相方の発話を止める（バージイン）
-      bargeIn: bool('BARGE_IN', true),
+      // 相方が喋っている間に配信者が話したとき: duck = 声を小さくする / stop = 中断する / off = 何もしない
+      bargeIn: bargeInMode(env.BARGE_IN),
+      // duck のときの音量（0〜1）と、途中経過が途切れてから元に戻すまでの時間（ms）
+      duckVolume: num('DUCK_VOLUME', 0.3),
+      duckReleaseMs: num('DUCK_RELEASE_MS', 1000),
       // 相方が喋っている間マイクを聞く役に送らない（スピーカー運用で相方の声を拾う場合に 1）
       gateMicWhileSpeaking: bool('GATE_MIC_WHILE_SPEAKING', false),
     },
@@ -75,6 +78,13 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       pollMinMs: num('CHAT_POLL_MIN_MS', 10000),
     },
   };
+}
+
+// 割り込み時の動作。以前の真偽値の指定（1/true = 中断、0/false = 何もしない）も受け付ける
+function bargeInMode(v) {
+  if (v === '1' || v === 'true' || v === 'stop') return 'stop';
+  if (v === '0' || v === 'false' || v === 'off') return 'off';
+  return 'duck';
 }
 
 // 起動に必須の設定のうち、欠けているものの環境変数名を返す

@@ -46,6 +46,7 @@ export class Director extends EventEmitter {
     this.busy = false; // 問い合わせ中
     this.pending = false; // 問い合わせ中に新しい発話が届いた
     this.paused = false;
+    this.releaseTimer = null; // 小さくした声を元に戻すタイマー
     speaker.on('idle', () => this.hideIfDismissed());
   }
 
@@ -57,9 +58,24 @@ export class Director extends EventEmitter {
   onUtterance(text) {
     log.debug(`🎤 ${text}`);
     this.memory.add('配信者', text);
-    // 相方が喋っている最中に配信者が話し始めたら黙らせる
-    if (this.cfg.bargeIn && this.speaker.speaking && text.trim().length >= 2) this.speaker.stop();
+    // 相方が喋っている最中に配信者が話したら、設定に従って止める（duck なら話し終えたので音量を戻す）
+    if (this.cfg.bargeIn === 'stop' && this.speaker.speaking && text.trim().length >= 2) this.speaker.stop();
+    if (this.cfg.bargeIn === 'duck') this.releaseDuck();
     this.consider(this.callsName(text));
+  }
+
+  // 配信者が話している途中（途中経過の文字起こし）。duck なら相方の声を小さくし、途切れたら戻す
+  onInterim(text) {
+    if (this.cfg.bargeIn !== 'duck' || !this.speaker.speaking || text.trim().length < 2) return;
+    this.speaker.setVolume(this.cfg.duckVolume);
+    clearTimeout(this.releaseTimer);
+    this.releaseTimer = setTimeout(() => this.releaseDuck(), this.cfg.duckReleaseMs);
+  }
+
+  releaseDuck() {
+    clearTimeout(this.releaseTimer);
+    this.releaseTimer = null;
+    this.speaker.setVolume(1);
   }
 
   addChat(msgs) {

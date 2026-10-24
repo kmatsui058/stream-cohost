@@ -1,7 +1,7 @@
 // 配信に重ねる画面のロジック。ブラウザ（OBS のブラウザソース）で動き、テストでは偽物を渡して動かす。
 //
 // サーバーから {type:'say', id, text, wav(base64)} を受けたら再生し、終わったら {type:'ended', id} を返す。
-// {type:'stop'} で再生中の音声を止める。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
+// {type:'stop'} で再生中の音声を止める。{type:'volume', level} で再生音量をなめらかに変える。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
 // {type:'presence', visible} で相方を出す／消す（root の present クラス → CSS で表示を切り替え）。
 // 召喚直後は薄く出し、最初の音声を再生する直前に root に awake を付けてはっきりさせる（退去まで付けたまま）。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
@@ -41,7 +41,10 @@ function base64ToArrayBuffer(b64) {
 export function createOverlayClient({ audioContext: ctx, connect: openSocket, elements: el, schedule = setTimeout }) {
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 512;
-  analyser.connect(ctx.destination);
+  // 再生音量（配信者と声がかぶったときに小さくする）。明るさは音量を変える前の音で決める
+  const gain = ctx.createGain();
+  analyser.connect(gain);
+  gain.connect(ctx.destination);
   const samples = new Float32Array(analyser.fftSize);
   let brightness = DIM;
   let speaking = false;
@@ -117,6 +120,7 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       }
       if (m.type === 'say') return say(m);
       if (m.type === 'stop') stopCurrent();
+      if (m.type === 'volume') gain.gain.setTargetAtTime(m.level, ctx.currentTime, 0.05);
       if (m.type === 'profile') {
         el.name.textContent = m.name ?? '';
         el.root.classList.toggle('has-character', !!m.character);

@@ -63,6 +63,22 @@ describe('live-session（聞く役）', () => {
     });
   });
 
+  describe('話している途中を伝える', () => {
+    it('途中経過が届く: 話している途中として伝え、発話としては伝えない', async () => {
+      const live = fakeLiveAi();
+      listener = new Listener(cfg, live.ai);
+      const interim = [];
+      const got = [];
+      listener.on('interim', (t) => interim.push(t));
+      listener.on('utterance', (t) => got.push(t));
+      await listener.connect();
+      live.last().receive({ serverContent: { interimInputTranscription: { text: 'ちょっと' } } });
+      live.last().receive({ serverContent: { interimInputTranscription: { text: ' ' } } });
+      expect(interim).toEqual(['ちょっと']);
+      expect(got).toEqual([]);
+    });
+  });
+
   describe('予告された切断の前に張り直す', () => {
     it('切断の予告を受けた: 新しいセッションを張り、古いものを閉じる', async () => {
       const live = fakeLiveAi();

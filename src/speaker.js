@@ -22,6 +22,7 @@ export class Speaker extends EventEmitter {
     this.seq = 0;
     this.running = false;
     this.gen = 0; // 再生ループの世代番号
+    this.volume = 1; // 画面に指示している再生音量
     overlay.on('ended', (id) => {
       if (this.current?.id === id) this.current.resolve();
     });
@@ -68,7 +69,15 @@ export class Speaker extends EventEmitter {
     }
     if (gen !== this.gen) return;
     this.running = false;
+    this.setVolume(1); // 次の発話は元の音量から
     this.emit('idle');
+  }
+
+  // 再生音量を画面に指示する（配信者と声がかぶったときに小さくする）。変わらなければ送らない
+  setVolume(level) {
+    if (level === this.volume) return;
+    this.volume = level;
+    this.overlay.broadcast({ type: 'volume', level });
   }
 
   stop() {
@@ -81,6 +90,7 @@ export class Speaker extends EventEmitter {
     const cur = this.current;
     this.current = null;
     cur?.resolve();
+    this.setVolume(1);
     this.emit('idle');
   }
 }

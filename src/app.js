@@ -56,6 +56,7 @@ export function createApp(config, deps = {}) {
     listener.sendAudio(pcm);
   });
   listener.on('utterance', (text) => director.onUtterance(text));
+  listener.on('interim', (text) => director.onInterim(text));
   director.on('presence', (visible) => overlay.setPresence(visible));
   obs.on('frame', (jpeg) => {
     frames.push(jpeg);
