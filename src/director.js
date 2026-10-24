@@ -66,6 +66,7 @@ export class Director extends EventEmitter {
 
   // 配信者が話している途中（途中経過の文字起こし）。duck なら相方の声を小さくし、途切れたら戻す
   onInterim(text) {
+    log.debug(`🎤… ${text}`);
     if (this.cfg.bargeIn !== 'duck' || !this.speaker.speaking || text.trim().length < 2) return;
     this.speaker.setVolume(this.cfg.duckVolume);
     clearTimeout(this.releaseTimer);
