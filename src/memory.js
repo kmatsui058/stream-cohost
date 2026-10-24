@@ -4,7 +4,7 @@
 //   記録 = 要約以降の発言すべて（「話者: 発言」）
 //
 // を答える役への問い合わせに使う。要約していない記録が SUMMARIZE_AT_CHARS を超えたら、
-// 直近 RECENT_ENTRIES 件を残して要約する。要約は別のモデル（既定 gemini-3.8-flash）で作り、logs/summary.txt で確認できる。
+// 直近 RECENT_ENTRIES 件を残して要約する。要約は別のモデル（既定 gemini-3.8-flash）で作り、内容はログに残る。
 //
 // 配信をまたぐ記憶（logs/carryover.json）:
 //   { savedAt, longSummary: 累積の要約, pending: [{ at, summary }] まだまとめ直していない回, recent: 最後に中身があった回の直近の発言 }
@@ -32,7 +32,6 @@ const withTimeout = (p, ms) => {
 export class Memory {
   constructor({
     ai, model, maxChars, recentEntries, persona, summarizeAtChars = 12000, longMaxChars = 20000,
-    summaryFile = path.resolve('logs', 'summary.txt'),
     stateFile = path.resolve('logs', 'carryover.json'), // 配信をまたいで引き継ぐ記憶
     sessionsDir = path.join(path.dirname(stateFile), 'sessions'), // 各回の要約の履歴
   }) {
@@ -43,7 +42,6 @@ export class Memory {
     this.recentEntries = recentEntries;
     this.summarizeAtChars = summarizeAtChars;
     this.persona = persona;
-    this.summaryFile = summaryFile;
     this.stateFile = stateFile;
     this.sessionsDir = sessionsDir;
     this.startedAt = new Date();
@@ -162,8 +160,6 @@ ${unmerged}`;
         this.summary = text;
         const done = new Set(old);
         this.entries = this.entries.filter((e) => !done.has(e));
-        fs.mkdirSync(path.dirname(this.summaryFile), { recursive: true });
-        fs.writeFileSync(this.summaryFile, `# ${new Date().toLocaleString('ja-JP')}\n\n${text}\n`);
         log.info(`要約を更新 (${old.length} 件 → ${text.length} 文字, ${Date.now() - t0}ms)\n${text}`);
         this.save();
       } catch (e) {
