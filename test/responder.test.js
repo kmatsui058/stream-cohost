@@ -26,6 +26,8 @@ describe('answering / 召喚中の発話に答える（問い合わせの中身�
       { mimeType: 'image/jpeg', data: 'f3' },
     ]);
     expect(parts.some((p) => p.text?.includes(NO_FRAMES_NOTE))).toBe(false);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/問い合わせ中（画面 3 枚・指示 2 字・記録 \d+ 字）/);
   });
 
   it('画面がまだない: 画像を入れず、画面が届いていないことを書き添える', async () => {

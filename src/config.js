@@ -27,7 +27,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       model: env.RESPONDER_MODEL || 'gemini-4-argon',
       // 問い合わせに添える直近の画面の枚数
       frames: num('RESPONDER_FRAMES', 3),
-      timeoutMs: num('RESPONDER_TIMEOUT_MS', 60000),
+      // 1 回の問い合わせの待ち時間。時間切れやエラーなら 1 回だけやり直す
+      timeoutMs: num('RESPONDER_TIMEOUT_MS', 30000),
       // Google 検索を使わせるか（最新の情報や、確かでない仕様を確かめる。検索すると数秒遅くなる）
       search: bool('RESPONDER_SEARCH', true),
     },

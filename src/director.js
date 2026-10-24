@@ -137,16 +137,23 @@ export class Director extends EventEmitter {
   }
 
   async ask() {
+    const request = {
+      instruction: this.instruction(),
+      transcript: this.memory.transcript(),
+      frames: this.getFrames(),
+    };
     let reply;
     try {
-      reply = await this.responder.ask({
-        instruction: this.instruction(),
-        transcript: this.memory.transcript(),
-        frames: this.getFrames(),
-      });
+      reply = await this.responder.ask(request);
     } catch (e) {
-      log.error(`問い合わせに失敗しました: ${e.message}`);
-      return;
+      // 時間切れやエラーは 1 回だけやり直す（召喚直後の 1 回目だけ返ってこないことがあった）
+      log.warn(`問い合わせに失敗したので、もう一度問い合わせます: ${e.message}`);
+      try {
+        reply = await this.responder.ask(request);
+      } catch (e2) {
+        log.error(`問い合わせに失敗しました: ${e2.message}`);
+        return;
+      }
     }
     if (this.paused) return;
     // 控えの合図（記憶・忘却）を実行して取り除く
