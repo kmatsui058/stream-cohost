@@ -1,5 +1,5 @@
 // コンソールと <dir>/YYYY-MM-DD.log の両方に出す。トラブル時はログファイルを見る。
-// 既定の出力先は ./logs。ファイルは最初に書き込むときに開く。
+// 既定の出力先は ./logs。1 行ずつ同期で追記する（書いた直後に読める。実行中もファイルを開いたままにしない）。
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -8,12 +8,11 @@ const settings = {
   debug: process.env.LOG_DEBUG === '1',
   toConsole: true,
 };
-let stream = null;
+let dirReady = false;
 
 export function configureLogging(opts) {
   Object.assign(settings, opts);
-  stream?.end();
-  stream = null;
+  dirReady = false;
 }
 
 export function logFilePath() {
@@ -24,11 +23,11 @@ function write(level, tag, args) {
   const ts = new Date().toLocaleTimeString('ja-JP', { hour12: false });
   const msg = args.map((a) => (a instanceof Error ? a.stack : typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
   const line = `${ts} ${level.padEnd(5)} [${tag}] ${msg}`;
-  if (!stream) {
+  if (!dirReady) {
     fs.mkdirSync(settings.dir, { recursive: true });
-    stream = fs.createWriteStream(logFilePath(), { flags: 'a' });
+    dirReady = true;
   }
-  stream.write(line + '\n');
+  fs.appendFileSync(logFilePath(), line + '\n');
   if (settings.toConsole && (level !== 'DEBUG' || settings.debug)) console.log(line);
 }
 

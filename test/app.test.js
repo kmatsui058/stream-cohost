@@ -32,6 +32,7 @@ describe('組み立てと操作', () => {
       fetch: vi.fn(async () => ({ ok: true, text: async () => '"0.25.2"' })),
       synthesize: async () => silentWav(1),
       stateFile: path.join(tmp, 'carryover.json'),
+      lorebookFile: path.join(tmp, 'lorebook.json'),
       carryOver,
       onQuit,
     });
@@ -77,6 +78,35 @@ describe('組み立てと操作', () => {
       app.handleCommand('o');
       expect(app.director.summoned).toBe(true);
       expect(app.overlay.present).toBe(true);
+    });
+
+    it('控えを手で足す: k キーワード,キーワード = 内容', async () => {
+      await build();
+      app.handleCommand('k ごつミノ,ゴツミノ = ごつミノは一般モンスター');
+      const saved = JSON.parse(fs.readFileSync(path.join(tmp, 'lorebook.json'), 'utf8')).entries;
+      expect(saved).toMatchObject([{ keys: ['ごつミノ', 'ゴツミノ'], content: 'ごつミノは一般モンスター' }]);
+    });
+
+    it('控えを消す: kl で一覧し、kd 1 で消す。書き方の誤りと存在しない番号は警告する', async () => {
+      await build();
+      app.handleCommand('k A = 一つ目');
+      app.handleCommand('kl');
+      app.handleCommand('kd 1');
+      app.handleCommand('kd 9');
+      app.handleCommand('k 等号なし');
+      expect(app.lorebook.entries).toEqual([]);
+      const log = await readLog();
+      expect(log).toContain('1. [A] 一つ目');
+      expect(log).toMatch(/控えの番号が見つかりません: 9/);
+      expect(log).toMatch(/書き方: k キーワード/);
+    });
+
+    it('起動時に控えを読み込み、問い合わせでキーワードが出たら指示に入れる', async () => {
+      await build();
+      app.lorebook.add({ keys: ['ごつミノ'], content: 'ごつミノは一般モンスター' });
+      app.handleCommand('t オルダ、ゴツミノって強い?');
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
+      expect(asks()[0].config.systemInstruction).toContain('ごつミノは一般モンスター');
     });
 
     it('s: 発話を中断する', async () => {

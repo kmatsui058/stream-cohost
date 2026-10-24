@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Director, splitSentences, isSilentReply, DISMISS_MARKER } from '../src/director.js';
 import { Memory } from '../src/memory.js';
 import { logFilePath } from '../src/log.js';
+import { Lorebook } from '../src/lorebook.js';
 
 function fakeSpeaker() {
   const s = new EventEmitter();
@@ -38,7 +39,7 @@ const readLog = async () => {
   return fs.readFileSync(logFilePath(), 'utf8');
 };
 
-function setup({ cfg = {}, frames = [] } = {}) {
+function setup({ cfg = {}, frames = [], lorebook } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-dir-'));
   const memory = new Memory({
     ai: { models: { generateContent: vi.fn(async () => ({ text: '要約' })) } },
@@ -53,6 +54,7 @@ function setup({ cfg = {}, frames = [] } = {}) {
     cfg: { bargeIn: 'duck', duckVolume: 0.3, duckReleaseMs: 1000, ...cfg },
     summonWords: ['オルダ', 'ヴァール'],
     getFrames: () => frames,
+    lorebook,
   });
   director.on('presence', (v) => presence.push(v));
   return { director, memory, speaker, responder, presence };
@@ -335,5 +337,39 @@ describe('文に区切る', () => {
     expect(isSilentReply('スルー。')).toBe(true);
     expect(isSilentReply(' スルー ')).toBe(true);
     expect(isSilentReply('今回はスルーしましょう。')).toBe(false);
+  });
+});
+
+describe('lorebook / 進行役とのつなぎ', () => {
+  const lore = () => new Lorebook({ file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-dlore-')), 'lorebook.json'), scanEntries: 6, stickyAsks: 3, maxChars: 3000 });
+
+  it('返事の記憶の合図: 項目を作り、合図は読み上げない', async () => {
+    const lorebook = lore();
+    const { director, responder, speaker } = setup({ lorebook });
+    director.onUtterance('オルダ、ごつミノは一般モンスターって覚えておいて');
+    await responder.reply('承知しました。【記憶: キーワード=ごつミノ、ゴツミノ ／ 内容=ごつミノは一般モンスター】');
+    expect(speaker.pushed).toEqual(['承知しました。']);
+    expect(lorebook.entries.map((e) => e.keys)).toEqual([['ごつミノ', 'ゴツミノ']]);
+  });
+
+  it('キーワードが出たら、その控えを問い合わせの指示に入れる', async () => {
+    const lorebook = lore();
+    lorebook.add({ keys: ['ごつミノ'], content: 'ごつミノは一般モンスター' });
+    lorebook.add({ keys: ['ニブルヘイム'], content: '死者の国' });
+    const { director, responder } = setup({ lorebook });
+    director.onUtterance('オルダ、ゴツミノって強い?');
+    const inst = responder.calls[0].req.instruction;
+    expect(inst.startsWith('PERSONA')).toBe(true);
+    expect(inst).toContain('ごつミノは一般モンスター');
+    expect(inst).not.toContain('死者の国');
+  });
+
+  it('退去したら、入れたままの控えを外す', async () => {
+    const lorebook = lore();
+    lorebook.add({ keys: ['ごつミノ'], content: 'ごつミノは一般モンスター' });
+    const { director, responder } = setup({ lorebook, cfg: {} });
+    director.onUtterance('オルダ、ゴツミノって強い?');
+    await responder.reply(`強いです。${DISMISS_MARKER}`);
+    expect(lorebook.active.size).toBe(0);
   });
 });
