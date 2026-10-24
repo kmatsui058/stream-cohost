@@ -28,6 +28,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       // 問い合わせに添える直近の画面の枚数
       frames: num('RESPONDER_FRAMES', 3),
       timeoutMs: num('RESPONDER_TIMEOUT_MS', 60000),
+      // Google 検索を使わせるか（最新の情報や、確かでない仕様を確かめる。検索すると数秒遅くなる）
+      search: bool('RESPONDER_SEARCH', true),
     },
     memory: {
       model: env.SUMMARY_MODEL || 'gemini-3.8-flash',
