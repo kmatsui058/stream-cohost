@@ -15,7 +15,6 @@ import path from 'node:path';
 import { logger } from './log.js';
 
 const log = logger('memory');
-const MERGE_TIMEOUT_MS = 60000;
 const STREAM_DESCRIPTION_MAX = 1000;
 // 残すものがないときに要約のモデルが返す言葉
 export const NOTHING = '（なし）';
@@ -224,11 +223,13 @@ ${unmerged}`;
   // 引き継ぎを保存する。累積の要約は変えない。今回の要約に中身がなければ、前回の内容をそのまま残す
   save() {
     const meaningful = !isNothing(this.summary);
-    const recent = this.lastRecent ?? this.entries;
+    // 「（なし）」と判断された回だけ前回の内容を残す。まだ要約できていないだけなら、直近の発言は保存する
+    const judgedNothing = !!this.summary && !meaningful;
+    const recent = (this.lastRecent ?? this.entries).map(({ role, text }) => ({ role, text }));
     this.writeState({
       longSummary: this.longSummary,
       pending: meaningful ? [...this.pending, { at: this.startedAt.toISOString(), summary: this.summary }] : this.pending,
-      recent: meaningful ? recent.map(({ role, text }) => ({ role, text })) : this.prevRecent,
+      recent: judgedNothing || !recent.length ? this.prevRecent : recent,
     });
   }
 
@@ -262,7 +263,7 @@ ${unmerged}`;
       const t0 = Date.now();
       const res = await withTimeout(
         this.ai.models.generateContent({ model: this.model, contents: this.buildMergePrompt(this.summary) }),
-        MERGE_TIMEOUT_MS,
+        this.timeoutMs,
       );
       const merged = res.text?.trim();
       if (!merged) throw new Error('まとめ直した要約が空でした');
