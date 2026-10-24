@@ -1,7 +1,7 @@
 # answering Specification
 
 ## Purpose
-TBD - created by archiving change summon-mode. Update Purpose after archive.
+相方が召喚されている間、配信者の発話やチャットに、考えてから答えるモデルで返事をする。指示・要約以降の記録・直近の配信画面を渡し、返事を読み上げ、退去の合図を扱う。
 
 ## Requirements
 

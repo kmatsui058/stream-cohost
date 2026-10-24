@@ -1,7 +1,7 @@
 # live-session Specification
 
 ## Purpose
-AI（Gemini Live API）とのリアルタイムセッションを確立・維持し、配信中に途切れても自動で回復させる。音声・画像・テキストの入力と、AI の発言・割り込みなどのイベントの出入口になる。
+マイク音声を AI（Gemini Live API の文字起こし専用モデル）に流し続け、無音で区切られた発話を 1 件ずつ受け取る。配信中に途切れても自動で回復させる。
 
 ## Requirements
 
