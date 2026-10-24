@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Memory } from '../src/memory.js';
 import { logFilePath } from '../src/log.js';
+import { Lorebook } from '../src/lorebook.js';
 
 function fakeAi(reply = '- ゲーム実況中。ボス戦で3回負けた') {
   return { models: { generateContent: vi.fn(async () => ({ text: reply })) } };
@@ -98,7 +99,7 @@ describe('conversation-memory', () => {
       const prompt = ai.models.generateContent.mock.calls[0][0].contents;
       expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash');
       expect(prompt).toContain('4000 文字以内');
-      expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方[\s\S]*常連/);
+      expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方/);
       expect(prompt).toMatch(/捨てるもの[\s\S]*相づち[\s\S]*挨拶の繰り返し[\s\S]*言い淀み[\s\S]*動作確認/);
       expect(prompt).toContain('（なし）');
     });
@@ -265,6 +266,7 @@ describe('conversation-memory', () => {
       expect(merge).toMatch(/動作確認/);
       expect(merge).toMatch(/書かれていない出来事を作らない/);
       expect(merge).toMatch(/新しい出来事のない回には見出しを立てない/);
+      expect(merge).toMatch(/言葉の詳しい情報は控えにあるので/);
       const s = state();
       expect(s.longSummary).toBe('# 累積\n- 10/18 と 10/21 と今回');
       expect(s.pending).toEqual([]);
@@ -438,6 +440,55 @@ describe('conversation-memory', () => {
       expect(fs.existsSync(summaryFile)).toBe(false);
       await new Promise((r) => setTimeout(r, 50));
       expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/要約を更新[^\n]*\n二回目の要約の中身/);
+    });
+  });
+  describe('lorebook / 要約と控えの役割を分ける', () => {
+    const lore = () => new Lorebook({ file: path.join(path.dirname(summaryFile), 'lorebook.json') });
+    const jsonAi = (obj) => ({ models: { generateContent: vi.fn(async () => ({ text: JSON.stringify(obj) })) } });
+
+    it('言葉の詳細は控えに分ける: 要約には名前だけ、詳細は控えとして JSON で返すよう指示する', async () => {
+      const ai = jsonAi({ summary: '- 流れ', entries: [] });
+      const mem = make(ai, 0);
+      mem.lorebook = lore();
+      fill(mem, 1);
+      await mem.summarize();
+      const req = ai.models.generateContent.mock.calls[0][0];
+      expect(req.config.responseMimeType).toBe('application/json');
+      expect(req.config.responseSchema.required).toEqual(['summary', 'entries']);
+      expect(req.contents).toMatch(/名前だけを書き、詳しい情報は書かない/);
+      expect(req.contents).toMatch(/entries[\s\S]*keys[\s\S]*投稿者名/);
+    });
+
+    it('要約で視聴者の控えができる: 要約は summary だけになり、項目が作られる', async () => {
+      const ai = jsonAi({ summary: '- ドカンさんが攻略情報をくれた', entries: [{ keys: ['@AtelierDokan', 'ドカン'], content: '攻略情報に詳しい常連' }] });
+      const mem = make(ai, 0);
+      mem.lorebook = lore();
+      mem.add('チャット', '@AtelierDokan: ごつミノは一般です');
+      await mem.summarize();
+      expect(mem.summary).toBe('- ドカンさんが攻略情報をくれた');
+      expect(mem.lorebook.entries).toMatchObject([{ keys: ['@AtelierDokan', 'ドカン'], content: '攻略情報に詳しい常連' }]);
+    });
+
+    it('既存の控えを更新する: 記録に出てくる項目の内容を添え、返った全文で置き換える', async () => {
+      const ai = jsonAi({ summary: '- 流れ', entries: [{ keys: ['ドカン'], content: '攻略情報に詳しい常連。休止期間がある' }] });
+      const mem = make(ai, 0);
+      mem.lorebook = lore();
+      mem.lorebook.add({ keys: ['ドカン', '@AtelierDokan'], content: '攻略情報に詳しい常連' });
+      mem.lorebook.add({ keys: ['ニブルヘイム'], content: '死者の国' });
+      mem.add('チャット', '@AtelierDokan: 私は休止してました');
+      await mem.summarize();
+      const prompt = ai.models.generateContent.mock.calls[0][0].contents;
+      expect(prompt).toMatch(/# 既にある控え[\s\S]*攻略情報に詳しい常連/);
+      expect(prompt).not.toContain('死者の国');
+      expect(mem.lorebook.entries[0].content).toBe('攻略情報に詳しい常連。休止期間がある');
+    });
+
+    it('JSON でない返事: 全体を要約として扱う', async () => {
+      const mem = make(fakeAi('ただの文章'), 0);
+      mem.lorebook = lore();
+      fill(mem, 1);
+      await mem.summarize();
+      expect(mem.summary).toBe('ただの文章');
     });
   });
 });

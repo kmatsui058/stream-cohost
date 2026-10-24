@@ -33,7 +33,7 @@ export function splitSentences(text) {
 const toKatakana = (s) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
 
 export class Director extends EventEmitter {
-  constructor({ responder, speaker, memory, cfg, summonWords, getFrames = () => [] }) {
+  constructor({ responder, speaker, memory, cfg, summonWords, getFrames = () => [], lorebook = null }) {
     super();
     this.responder = responder;
     this.speaker = speaker;
@@ -41,6 +41,7 @@ export class Director extends EventEmitter {
     this.cfg = cfg;
     this.summonWords = summonWords.map(toKatakana);
     this.getFrames = getFrames;
+    this.lorebook = lorebook; // 控え（キーワードが出たときだけ指示に入れる）
     this.summoned = false;
     this.shown = false; // 画面に相方を出しているか（退去後も読み上げが終わるまで出しておく）
     this.busy = false; // 問い合わせ中
@@ -103,6 +104,7 @@ export class Director extends EventEmitter {
   dismiss() {
     this.summoned = false;
     this.pending = false;
+    this.lorebook?.reset();
     log.info('退去しました');
     this.hideIfDismissed();
   }
@@ -138,7 +140,7 @@ export class Director extends EventEmitter {
     let reply;
     try {
       reply = await this.responder.ask({
-        instruction: this.memory.instruction(),
+        instruction: this.instruction(),
         transcript: this.memory.transcript(),
         frames: this.getFrames(),
       });
@@ -147,6 +149,8 @@ export class Director extends EventEmitter {
       return;
     }
     if (this.paused) return;
+    // 控えの合図（記憶・忘却）を実行して取り除く
+    if (this.lorebook) reply = this.lorebook.apply(reply);
     const dismiss = reply.includes(DISMISS_MARKER);
     const body = reply.replaceAll(DISMISS_MARKER, '').trim();
     if (!body || isSilentReply(body)) {
@@ -158,6 +162,14 @@ export class Director extends EventEmitter {
     }
     if (dismiss) this.dismiss();
     this.memory.maybeSummarize();
+  }
+
+  // 答える役への指示: 記憶の指示に、直近の記録でキーワードが出た控えを足す
+  instruction() {
+    const base = this.memory.instruction();
+    if (!this.lorebook) return base;
+    const lore = this.lorebook.select(this.memory.format(this.memory.entries.slice(-this.lorebook.scanEntries)));
+    return lore ? `${base}\n\n${lore}` : base;
   }
 
   setPaused(p) {

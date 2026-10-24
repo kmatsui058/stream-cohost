@@ -21,6 +21,31 @@ const STREAM_DESCRIPTION_MAX = 1000;
 // 残すものがないときに要約のモデルが返す言葉
 export const NOTHING = '（なし）';
 const isNothing = (s) => !s || s.replace(/[\s（）()。]/g, '') === 'なし';
+// 要約の返事の形: 今回の要約と、言葉ごとの控え（lorebook の項目）
+const SUMMARY_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    entries: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { keys: { type: 'array', items: { type: 'string' } }, content: { type: 'string' } },
+        required: ['keys', 'content'],
+      },
+    },
+  },
+  required: ['summary', 'entries'],
+};
+
+// JSON で返らなかったときは、全体を要約として扱う
+function parseSummary(raw = '') {
+  try {
+    const o = JSON.parse(raw);
+    if (typeof o?.summary === 'string') return { summary: o.summary.trim(), entries: Array.isArray(o.entries) ? o.entries : [] };
+  } catch {}
+  return { summary: raw.trim(), entries: [] };
+}
 
 const withTimeout = (p, ms) => {
   let t;
@@ -54,6 +79,7 @@ export class Memory {
     this.entries = []; // { role: '配信者' | '相方' | 'チャット', text, sealed? }
     this.lastRecent = null; // 終了時に全部を要約する前に取っておいた直近の発言
     this.summarizing = null;
+    this.lorebook = null; // 言葉ごとの控え（app.js でセット）。要約のついでに項目を作る・更新する
   }
 
   // 発話・返事・チャットを 1 件ずつ記録する
@@ -98,24 +124,40 @@ export class Memory {
   - 配信者が話した事実・好み・予定・感想
   - 配信者や視聴者が教えてくれたこと、訂正されたこと（相方の誤りが訂正された場合は、正しい内容を残す）
   - 相方が聞かれて答えた内容
-  - 常連の視聴者の名前と特徴
+- 人物（視聴者を含む）・場所・アイテム・用語などは、要約には名前だけを書き、詳しい情報は書かない。詳しい情報は entries に書く
 - 捨てるもの:
   - 相づち、挨拶の繰り返し、言い淀み、同じ内容の繰り返し
   - 相方（AI）の仕組みの動作確認・設定・不具合のやり取り（「聞こえる？」「テスト」、プロンプトや設定、AI の調子の話など）
   - 「すでに与えている情報」に書いてあること（配信者や相方の名前・設定、配信のタイトル、過去の配信の出来事など）。繰り返さない
   - 相方や配信者が過去の配信を振り返って話しただけの内容は、今回の出来事として残さない（「前回は〜でした」という説明など）
 - 書き起こしは自動音声認識なので誤字がある。文脈から補ってよいが、推測で事実を作らない
-- 残すものが何もなければ「${NOTHING}」とだけ出力する
-- 要約本文だけを出力する
+
+# 出力（JSON）
+- summary: 今回の配信の要約。残すものが何もなければ「${NOTHING}」
+- entries: 言葉ごとの控え。今回の書き起こしで新しく分かったことがある言葉だけ（なければ空）
+  - keys: その言葉と、表記ゆれ・読み・聞き間違いのパターン。視聴者なら、チャットの投稿者名（@ から始まるもの）も入れる
+  - content: その言葉について分かっていることの全文。「既にある控え」を更新するときは、同じ keys を使い、今の内容に新しく分かったことを足した全文にする。単独で意味が通るように書く
 
 # すでに与えている情報（相方への指示として別に渡している）
 ${this.givenInfo()}
+
+# 既にある控え（今回の書き起こしに出てくる言葉）
+${this.relatedEntries(old) || '（なし）'}
 
 # これまでの要約
 ${this.summary || '（なし。配信開始直後）'}
 
 # 新しい書き起こし
 ${this.format(old)}`;
+  }
+
+  // 要約する書き起こしにキーワードが出てくる、既存の控え
+  relatedEntries(old) {
+    if (!this.lorebook) return '';
+    return this.lorebook
+      .matches(this.format(old))
+      .map((e) => `- keys: ${e.keys.join('、')}\n  content: ${e.content}`)
+      .join('\n');
   }
 
   buildMergePrompt(current) {
@@ -131,6 +173,7 @@ ${this.format(old)}`;
 - 捨てるもの:
   - 相方（AI）の仕組みの動作確認・設定・不具合のやり取り
   - 「すでに与えている情報」に書いてあること（配信者や相方の名前・設定など）。繰り返さない
+  - 人物（視聴者を含む）・場所・アイテム・用語などの言葉の詳しい情報は控えにあるので、名前だけを書き、詳細は書かない
 - 渡した要約に書かれていない出来事を作らない。推測で事実を作らない
 - 新しい出来事のない回には見出しを立てない
 - 要約本文だけを出力する
@@ -154,10 +197,15 @@ ${unmerged}`;
     this.summarizing = (async () => {
       const t0 = Date.now();
       try {
-        const res = await this.ai.models.generateContent({ model: this.model, contents: this.buildPrompt(old) });
-        const text = res.text?.trim();
+        const res = await this.ai.models.generateContent({
+          model: this.model,
+          contents: this.buildPrompt(old),
+          config: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA },
+        });
+        const { summary: text, entries } = parseSummary(res.text);
         if (!text) throw new Error('要約が空でした');
         this.summary = text;
+        for (const e of entries) this.lorebook?.add(e);
         const done = new Set(old);
         this.entries = this.entries.filter((e) => !done.has(e));
         log.info(`要約を更新 (${old.length} 件 → ${text.length} 文字, ${Date.now() - t0}ms)\n${text}`);

@@ -11,6 +11,7 @@ import { ObsCapture } from './obs.js';
 import { Listener } from './listener.js';
 import { Responder } from './responder.js';
 import { Memory } from './memory.js';
+import { Lorebook } from './lorebook.js';
 import { Overlay } from './overlay.js';
 import { Speaker } from './speaker.js';
 import { Director } from './director.js';
@@ -20,7 +21,7 @@ import { checkVoicevox, synthesize } from './voicevox.js';
 const log = logger('main');
 
 export const HELP =
-  '操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  o=召喚/退去  v <動画ID>=チャット対象を変更  r=今すぐ要約  m=今の記憶を表示  q=終了';
+  '操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  o=召喚/退去  k <キーワード,…> = <内容>=控えを足す  kl=控えの一覧  kd <番号>=控えを消す  v <動画ID>=チャット対象を変更  r=今すぐ要約  m=今の記憶を表示  q=終了';
 
 export function createApp(config, deps = {}) {
   const fetchFn = deps.fetch ?? fetch;
@@ -35,6 +36,8 @@ export function createApp(config, deps = {}) {
     ai, persona: config.gemini.persona, ...config.memory,
     ...(deps.stateFile && { stateFile: deps.stateFile }),
   });
+  const lorebook = new Lorebook({ ...config.lorebook, ...(deps.lorebookFile && { file: deps.lorebookFile }) });
+  memory.lorebook = lorebook;
   const speaker = new Speaker(overlay, config.voicevox, {
     synthesize: deps.synthesize ?? ((text, cfg) => synthesize(text, cfg, fetchFn)),
   });
@@ -44,6 +47,7 @@ export function createApp(config, deps = {}) {
     cfg: config.director,
     summonWords: config.summonWords,
     getFrames: () => [...frames],
+    lorebook,
   });
   const mic = new Mic(config.mic, deps.spawn ? { spawn: deps.spawn } : {});
   const obs = new ObsCapture(config.obs, deps.obsClient ? { client: deps.obsClient } : {});
@@ -70,6 +74,7 @@ export function createApp(config, deps = {}) {
   async function start() {
     await checkVoicevox(config.voicevox.url, fetchFn);
     const port = await overlay.start();
+    lorebook.load();
     if (carryOver) memory.loadPrevious();
     else log.info('前回の記憶は引き継がずに起動します');
     await listener.connect();
@@ -93,6 +98,13 @@ export function createApp(config, deps = {}) {
     await overlay.close();
   }
 
+  // k キーワード,キーワード = 内容
+  function addLore(arg) {
+    const i = arg.indexOf('=');
+    const keys = i < 0 ? [] : arg.slice(0, i).split(/[、,，]/);
+    if (i < 0 || !lorebook.add({ keys, content: arg.slice(i + 1) })) log.warn('書き方: k キーワード,キーワード = 内容');
+  }
+
   function handleCommand(line) {
     const [cmd, ...rest] = line.trim().split(' ');
     const arg = rest.join(' ').trim();
@@ -101,6 +113,9 @@ export function createApp(config, deps = {}) {
       case 's': speaker.stop(); break;
       case 't': if (arg) director.onUtterance(arg); break;
       case 'o': director.toggleSummon(); break;
+      case 'k': addLore(arg); break;
+      case 'kl': log.info(`控え\n${lorebook.list() || '（なし）'}`); break;
+      case 'kd': if (!lorebook.removeAt(Number(arg))) log.warn(`控えの番号が見つかりません: ${arg}`); break;
       case 'v': chat.start(arg); break;
       case 'r': memory.summarize().catch((e) => log.warn(`要約に失敗しました: ${e.message}`)); break;
       case 'm': log.info(`現在の記憶\n${memory.instruction().slice(config.gemini.persona.length).trim() || '（要約なし）'}\n\n# 要約以降の記録\n${memory.transcript() || '（なし）'}`); break;
@@ -109,5 +124,5 @@ export function createApp(config, deps = {}) {
     }
   }
 
-  return { overlay, listener, responder, memory, speaker, director, mic, obs, chat, frames, start, shutdown, handleCommand };
+  return { overlay, listener, responder, memory, lorebook, speaker, director, mic, obs, chat, frames, start, shutdown, handleCommand };
 }

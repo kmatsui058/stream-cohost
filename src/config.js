@@ -39,6 +39,12 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       // 要約していない記録がこの文字数を超えたら要約する
       summarizeAtChars: num('SUMMARIZE_AT_CHARS', 12000),
     },
+    // 控え（ロアブック）: 直近の記録の何件からキーワードを探すか、当たった後に何回入れたままにするか、1 回に入れる上限の文字数
+    lorebook: {
+      scanEntries: num('LORE_SCAN_ENTRIES', 6),
+      stickyAsks: num('LORE_STICKY_ASKS', 3),
+      maxChars: num('LORE_MAX_CHARS', 3000),
+    },
     mic: {
       // ffmpeg の dshow デバイス名。`npm run mics` で一覧が出る
       device: env.MIC_DEVICE,
