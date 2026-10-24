@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import fs from 'node:fs';
 import { Responder, NO_FRAMES_NOTE } from '../src/responder.js';
+import { logFilePath } from '../src/log.js';
 
 const cfg = { model: 'gemini-4-argon', timeoutMs: 60000 };
 const fakeAi = (impl) => ({ models: { generateContent: vi.fn(impl) } });
@@ -45,5 +47,22 @@ describe('answering / 召喚中の発話に答える（問い合わせの中身�
     const done = expect(p).rejects.toThrow('タイムアウト');
     await vi.advanceTimersByTimeAsync(1000);
     await done;
+  });
+
+  describe('答える役が検索を使える', () => {
+    it('検索が有効: Google 検索の道具を付ける。無効なら付けない', async () => {
+      const ai = fakeAi(async () => ({ text: 'はい' }));
+      await new Responder({ ...cfg, search: true }, ai).ask({ instruction: '', transcript: '', frames: [] });
+      await new Responder({ ...cfg, search: false }, ai).ask({ instruction: '', transcript: '', frames: [] });
+      expect(ai.models.generateContent.mock.calls[0][0].config.tools).toEqual([{ googleSearch: {} }]);
+      expect(ai.models.generateContent.mock.calls[1][0].config.tools).toBeUndefined();
+    });
+
+    it('検索した: 検索した言葉をログに記録する', async () => {
+      const ai = fakeAi(async () => ({ text: 'はい', candidates: [{ groundingMetadata: { webSearchQueries: ['ラグナロクオンライン イベント'] } }] }));
+      await new Responder({ ...cfg, search: true }, ai).ask({ instruction: '', transcript: '', frames: [] });
+      await new Promise((r) => setTimeout(r, 30));
+      expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/🔎 検索: ラグナロクオンライン イベント/);
+    });
   });
 });

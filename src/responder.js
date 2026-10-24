@@ -30,11 +30,13 @@ export class Responder {
         this.ai.models.generateContent({
           model: this.cfg.model,
           contents: [{ role: 'user', parts }],
-          config: { systemInstruction: instruction },
+          config: { systemInstruction: instruction, ...(this.cfg.search && { tools: [{ googleSearch: {} }] }) },
         }),
         new Promise((_, reject) => (timer = setTimeout(() => reject(new Error('タイムアウト')), this.cfg.timeoutMs))),
       ]);
       log.info(`返事を受け取りました (${Date.now() - t0}ms)`);
+      const queries = res.candidates?.[0]?.groundingMetadata?.webSearchQueries;
+      if (queries?.length) log.info(`🔎 検索: ${queries.join(' / ')}`);
       return (res.text ?? '').trim();
     } finally {
       clearTimeout(timer);

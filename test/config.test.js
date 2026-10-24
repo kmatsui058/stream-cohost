@@ -12,7 +12,8 @@ describe('operator-controls / 設定の既定値を使う', () => {
       silenceDurationMs: 800,
       vocabulary: ['オルダ', 'ヴァール'],
     });
-    expect(c.responder).toEqual({ model: 'gemini-4-argon', frames: 3, timeoutMs: 60000 });
+    expect(c.responder).toEqual({ model: 'gemini-4-argon', frames: 3, timeoutMs: 60000, search: true });
+    expect(loadConfig({ RESPONDER_SEARCH: '0' }, readPersona).responder.search).toBe(false);
     expect(c.summonWords).toEqual(['オルダ', 'ヴァール']);
     expect(c.memory).toEqual({ model: 'gemini-3.8-flash', maxChars: 4000, longMaxChars: 20000, recentEntries: 12, summarizeAtChars: 12000, timeoutMs: 120000 });
     expect(c.lorebook).toEqual({ scanEntries: 6, stickyAsks: 3, maxChars: 3000 });
