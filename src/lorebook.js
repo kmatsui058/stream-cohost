@@ -56,8 +56,8 @@ export class Lorebook {
     }
   }
 
-  // キーワードが既存の項目と重なれば、内容を置き換えてキーワードを足す。なければ新しく作る
-  add({ keys, content }) {
+  // キーワードが既存の項目と重なれば、内容を置き換えて（append なら書き足して）キーワードを足す。なければ新しく作る
+  add({ keys, content }, { append = false } = {}) {
     keys = keys.map((k) => k.trim()).filter(Boolean);
     content = content?.trim();
     if (!keys.length || !content) return null;
@@ -67,7 +67,7 @@ export class Lorebook {
     if (hit) {
       const have = new Set(hit.keys.map(normalize));
       hit.keys.push(...keys.filter((k) => !have.has(normalize(k))));
-      hit.content = content;
+      hit.content = append ? `${hit.content}\n${content}` : content;
       hit.updatedAt = now;
       log.info(`控えを更新しました ${label(hit)} ${content}`);
     } else {
@@ -108,7 +108,8 @@ export class Lorebook {
   apply(reply) {
     let text = reply.replace(REMEMBER, (_, body) => {
       const m = body.trim().match(REMEMBER_BODY);
-      if (m) this.add({ keys: splitKeys(m[1]), content: m[2] });
+      // 出来事の記憶なので、その日の日付を付け、既にある言葉には書き足す
+      if (m) this.add({ keys: splitKeys(m[1]), content: `（${new Date().toLocaleDateString('ja-JP')}）${m[2].trim()}` }, { append: true });
       else log.warn(`控えの合図を読めません: 【記憶: ${body}】`);
       return '';
     });

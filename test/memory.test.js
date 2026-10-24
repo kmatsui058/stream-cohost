@@ -479,6 +479,19 @@ describe('conversation-memory', () => {
       expect(req.contents).toMatch(/毎回のように出てくる言葉（「マスター」「配信者」「相方」/);
     });
 
+    it('意味の説明ではなく、配信での出来事を書かせる: 日付つきの出来事と関わりを書き、一般的な説明は書かないよう指示する', async () => {
+      const ai = jsonAi({ summary: '- 流れ', entries: [] });
+      const mem = make(ai, 0);
+      mem.lorebook = lore();
+      fill(mem, 1);
+      await mem.summarize();
+      const prompt = ai.models.generateContent.mock.calls[0][0].contents;
+      expect(prompt).toMatch(/配信の中でどう出てきて、配信者・視聴者・相方とどう関わったか/);
+      expect(prompt).toMatch(/一般的な意味や設定の説明は書かない/);
+      expect(prompt).toMatch(/今回の分は「（\d{4}\/\d{1,2}\/\d{1,2}）」で始める/);
+      expect(prompt).toMatch(/古い出来事ほど短く縮める/);
+    });
+
     it('要約で視聴者の控えができる: 要約は summary だけになり、項目が作られる', async () => {
       const ai = jsonAi({ summary: '- ドカンさんが攻略情報をくれた', entries: [{ keys: ['@AtelierDokan', 'ドカン'], content: '攻略情報に詳しい常連' }] });
       const mem = make(ai, 0);

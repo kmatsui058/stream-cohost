@@ -23,9 +23,18 @@ describe('lorebook', () => {
       const lb = make();
       const text = lb.apply('承知しました、覚えておきます。【記憶: キーワード=ごつミノ、ゴツミノ ／ 内容=ごつミノは一般モンスター、通常ミノがボス属性】');
       expect(text).toBe('承知しました、覚えておきます。');
-      expect(saved()).toMatchObject([{ keys: ['ごつミノ', 'ゴツミノ'], content: 'ごつミノは一般モンスター、通常ミノがボス属性' }]);
+      expect(saved()).toMatchObject([{ keys: ['ごつミノ', 'ゴツミノ'] }]);
+      expect(saved()[0].content).toMatch(/^（\d{4}\/\d{1,2}\/\d{1,2}）ごつミノは一般モンスター、通常ミノがボス属性$/);
       expect(Date.parse(saved()[0].createdAt)).not.toBeNaN();
       expect(await readLog()).toMatch(/控えを作りました \[ごつミノ, ゴツミノ\]/);
+    });
+
+    it('既にある言葉を覚えておくよう頼まれる: 既存の内容の後ろに日付つきで書き足す', () => {
+      const lb = make();
+      lb.add({ keys: ['ごつミノ'], content: '（2026/10/21）凍らなくて苦戦した' });
+      lb.apply('はい。【記憶: キーワード=ゴツミノ ／ 内容=一般モンスターだとドカンさんに教わった】');
+      expect(lb.entries).toHaveLength(1);
+      expect(lb.entries[0].content).toMatch(/^（2026\/10\/21）凍らなくて苦戦した\n（\d{4}\/\d{1,2}\/\d{1,2}）一般モンスターだとドカンさんに教わった$/);
     });
 
     it('1 つの返事に複数の合図: それぞれ項目にする（区切りは , や / でもよい）', () => {
