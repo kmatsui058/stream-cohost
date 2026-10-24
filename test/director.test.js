@@ -58,8 +58,12 @@ function setup({ cfg = {}, frames = [], lorebook } = {}) {
   });
   director.on('presence', (v) => presence.push(v));
   const thinking = [];
-  director.on('thinking', (v) => thinking.push(v));
-  return { director, memory, speaker, responder, presence, thinking };
+  const thinkingKinds = [];
+  director.on('thinking', (v, summon) => {
+    thinking.push(v);
+    thinkingKinds.push(v ? (summon ? '召喚直後' : '以降') : '終わり');
+  });
+  return { director, memory, speaker, responder, presence, thinking, thinkingKinds };
 }
 
 describe('turn-taking / answering（召喚・会話・退去）', () => {
@@ -234,9 +238,10 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
       director.onUtterance('オルダ');
       director.onUtterance('続き');
       await responder.reply('スルー');
-      expect(thinking).toEqual([true]);
+      expect(thinking).not.toContain(false); // 考え中が途切れない
       await responder.reply('はい。');
-      expect(thinking).toEqual([true, false]);
+      expect(thinking.at(-1)).toBe(false);
+      expect(thinking.filter((v) => v === false)).toHaveLength(1);
     });
 
     it('問い合わせに失敗する: やり直しも失敗したら考え中が終わる', async () => {
@@ -248,6 +253,34 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
       responder.calls.shift().reject(new Error('503'));
       await flush();
       expect(thinking).toEqual([true, false]);
+    });
+  });
+
+  describe('召喚直後とそれ以降で考え中を分ける', () => {
+    it('返事の後にまた問い合わせる: 1 回目は召喚直後、2 回目はそれ以降', async () => {
+      const { director, responder, thinkingKinds } = setup();
+      director.onUtterance('オルダ');
+      await responder.reply('はい。');
+      director.onUtterance('この敵は?');
+      await responder.reply('強いです。');
+      expect(thinkingKinds).toEqual(['召喚直後', '終わり', '以降', '終わり']);
+    });
+
+    it('召喚直後の問い合わせ中に話す: 最初の返事が届いたら、続きの問い合わせは以降の考え中になる', async () => {
+      const { director, responder, thinkingKinds } = setup();
+      director.onUtterance('オルダ');
+      director.onUtterance('続き');
+      await responder.reply('スルー');
+      await responder.reply('はい。');
+      expect(thinkingKinds).toEqual(['召喚直後', '以降', '終わり']);
+    });
+
+    it('退去してまた召喚する: また召喚直後から', async () => {
+      const { director, responder, thinkingKinds } = setup();
+      director.onUtterance('オルダ');
+      await responder.reply(`では。${DISMISS_MARKER}`);
+      director.onUtterance('オルダ');
+      expect(thinkingKinds).toEqual(['召喚直後', '終わり', '召喚直後']);
     });
   });
 

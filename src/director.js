@@ -47,6 +47,8 @@ export class Director extends EventEmitter {
     this.busy = false; // 問い合わせ中
     this.pending = false; // 問い合わせ中に新しい発話が届いた
     this.thinking = false; // 画面に考え中を出しているか
+    this.thinkingSummon = false; // 出している考え中が召喚直後のものか
+    this.justSummoned = false; // 召喚してから、まだ最初の返事が届いていない
     this.paused = false;
     this.releaseTimer = null; // 小さくした声を元に戻すタイマー
     speaker.on('idle', () => this.hideIfDismissed());
@@ -95,6 +97,7 @@ export class Director extends EventEmitter {
 
   summon() {
     this.summoned = true;
+    this.justSummoned = true;
     log.info('召喚されました');
     if (!this.shown) {
       this.shown = true;
@@ -140,11 +143,13 @@ export class Director extends EventEmitter {
     });
   }
 
-  // 考え中かどうかが変わったときだけ知らせる
+  // 考え中かどうか（と、召喚直後か）が変わったときだけ知らせる
   setThinking(on) {
-    if (this.thinking === on) return;
+    const summon = on && this.justSummoned;
+    if (this.thinking === on && this.thinkingSummon === summon) return;
     this.thinking = on;
-    this.emit('thinking', on);
+    this.thinkingSummon = summon;
+    this.emit('thinking', on, summon);
   }
 
   async ask() {
@@ -166,6 +171,7 @@ export class Director extends EventEmitter {
         return;
       }
     }
+    this.justSummoned = false; // 召喚後の最初の返事が届いた
     if (this.paused) return;
     // 控えの合図（記憶・忘却）を実行して取り除く
     if (this.lorebook) reply = this.lorebook.apply(reply);
