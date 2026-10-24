@@ -32,6 +32,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
     memory: {
       model: env.SUMMARY_MODEL || 'gemini-3.8-flash',
       maxChars: num('SUMMARY_MAX_CHARS', 4000),
+      // 配信をまたいで積み上げる要約の上限。答える役への問い合わせのたびに送るので、長いほど費用が増える
+      longMaxChars: num('LONG_SUMMARY_MAX_CHARS', 20000),
       // 要約せずにそのまま残す直近の発言数
       recentEntries: num('RECENT_ENTRIES', 12),
       // 要約していない記録がこの文字数を超えたら要約する

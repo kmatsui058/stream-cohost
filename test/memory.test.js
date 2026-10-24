@@ -99,7 +99,19 @@ describe('conversation-memory', () => {
       expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash');
       expect(prompt).toContain('4000 文字以内');
       expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方[\s\S]*常連/);
-      expect(prompt).toMatch(/捨てるもの[\s\S]*相づち[\s\S]*挨拶の繰り返し[\s\S]*言い淀み/);
+      expect(prompt).toMatch(/捨てるもの[\s\S]*相づち[\s\S]*挨拶の繰り返し[\s\S]*言い淀み[\s\S]*動作確認/);
+      expect(prompt).toContain('（なし）');
+    });
+
+    it('すでに与えている情報は繰り返さない: ペルソナと今日の配信の情報を添えて、繰り返さないよう指示する', async () => {
+      const ai = fakeAi();
+      const mem = make(ai, 0);
+      mem.setStreamInfo({ title: '【RO】EP追想#6', description: '' });
+      fill(mem, 1);
+      await mem.summarize();
+      const prompt = ai.models.generateContent.mock.calls[0][0].contents;
+      expect(prompt).toMatch(/# すでに与えている情報[\s\S]*PERSONA[\s\S]*【RO】EP追想#6/);
+      expect(prompt).toMatch(/すでに与えている情報.*繰り返さない/);
     });
 
     it('要約が空で返った: 失敗とし、記録と前回の要約を変えない', async () => {
@@ -183,67 +195,151 @@ describe('conversation-memory', () => {
       await mem.summarize();
       const inst = mem.instruction();
       expect(inst.indexOf('PERSONA')).toBe(0);
-      expect(inst).toMatch(/# ここまでの配信の要約\n- ボス戦中/);
+      expect(inst).toMatch(/# 今回のここまでの要約\n- ボス戦中/);
       expect(inst).not.toContain('がんばれ');
       expect(mem.transcript()).toBe('チャット: Aさん: がんばれ\nチャット: Bさん: 草');
     });
   });
 
-  describe('記憶を保存する', () => {
-    const makeWithState = (ai, recentEntries = 1) => {
-      const stateFile = path.join(path.dirname(summaryFile), 'carryover.json');
-      return { mem: new Memory({ ai, model: 'm', maxChars: 1500, recentEntries, persona: 'PERSONA', summaryFile, stateFile }), stateFile };
-    };
+  describe('記憶を保存する・配信をまたいで要約を積み上げる', () => {
+    let dir, stateFile, sessionsDir;
+    beforeEach(() => {
+      dir = path.dirname(summaryFile);
+      stateFile = path.join(dir, 'carryover.json');
+      sessionsDir = path.join(dir, 'sessions');
+    });
+    // 要約・まとめ直しの呼び出しを、プロンプトの中身で返し分ける偽物
+    const scriptedAi = ({ session = '- 今回はニブルヘイムを進めた', merged = '# 累積\n- 10/18 と 10/21 と今回', failMerge = false } = {}) => ({
+      models: {
+        generateContent: vi.fn(async ({ contents }) => {
+          if (contents.includes('これまでの配信の要約」を更新')) {
+            if (failMerge) throw new Error('503');
+            return { text: merged };
+          }
+          return { text: session };
+        }),
+      },
+    });
+    const makeMem = (ai) => new Memory({ ai, model: 'm', maxChars: 4000, longMaxChars: 20000, recentEntries: 1, persona: 'PERSONA', summaryFile, stateFile });
+    const state = () => JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    const writeState = (s) => fs.writeFileSync(stateFile, JSON.stringify(s));
 
-    it('要約を更新するたびに保存する', async () => {
-      const { mem, stateFile } = makeWithState(fakeAi('一回目の要約'));
+    it('配信中に要約を更新する: 累積の要約は変えず、今回の要約と直近の発言を保存する', async () => {
+      writeState({ savedAt: '2026-10-21T13:00:00.000Z', longSummary: '累積', pending: [], recent: [] });
+      const mem = makeMem(scriptedAi());
+      mem.loadPrevious();
       fill(mem, 3);
       await mem.summarize();
-      const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-      expect(s.summary).toBe('一回目の要約');
+      const s = state();
+      expect(s.longSummary).toBe('累積');
+      expect(s.pending.map((p) => p.summary)).toEqual(['- 今回はニブルヘイムを進めた']);
       expect(s.recent).toEqual([{ role: '配信者', text: '発言2' }]);
       expect(Date.parse(s.savedAt)).not.toBeNaN();
     });
 
-    it('終了する: 要約を更新してから保存する', async () => {
-      const ai = fakeAi('最終の要約');
-      const { mem, stateFile } = makeWithState(ai);
+    it('配信を終える: 今回分を要約し、累積の要約とまとめ直して保存し、今回の要約を履歴に残す', async () => {
+      writeState({ savedAt: '2026-10-21T13:00:00.000Z', longSummary: '- 10/18: グラストヘイム\n- 10/21: ニブルヘイム到着', pending: [], recent: [] });
+      const ai = scriptedAi();
+      const mem = makeMem(ai);
+      mem.loadPrevious();
       fill(mem, 3);
       await mem.finalize();
-      expect(ai.models.generateContent).toHaveBeenCalledTimes(1);
-      expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).summary).toBe('最終の要約');
+      const prompts = ai.models.generateContent.mock.calls.map((c) => c[0].contents);
+      const merge = prompts.find((p) => p.includes('これまでの配信の要約」を更新'));
+      expect(merge).toContain('20000 文字以内');
+      expect(merge).toContain('- 10/18: グラストヘイム');
+      expect(merge).toContain('- 今回はニブルヘイムを進めた');
+      expect(merge).toMatch(/古い配信ほど要点/);
+      expect(merge).toMatch(/動作確認/);
+      const s = state();
+      expect(s.longSummary).toBe('# 累積\n- 10/18 と 10/21 と今回');
+      expect(s.pending).toEqual([]);
+      expect(s.recent).toEqual([{ role: '配信者', text: '発言2' }]);
+      const history = fs.readdirSync(sessionsDir);
+      expect(history).toHaveLength(1);
+      expect(fs.readFileSync(path.join(sessionsDir, history[0]), 'utf8')).toContain('- 今回はニブルヘイムを進めた');
+    });
+
+    it('短い配信（要約が一度も走っていない）でも、終了時に全部を要約してまとめ直す', async () => {
+      const ai = scriptedAi();
+      const mem = makeMem(ai);
+      mem.add('配信者', '短い配信');
+      await mem.finalize();
+      expect(state().longSummary).toBe('# 累積\n- 10/18 と 10/21 と今回');
+      expect(state().recent).toEqual([{ role: '配信者', text: '短い配信' }]);
+    });
+
+    it('動作確認だけのセッションを終える: 累積の要約、前回の要約と直近の発言はそのまま残る', async () => {
+      const before = { savedAt: '2026-10-21T13:00:00.000Z', longSummary: '累積', pending: [{ at: '2026-10-21T13:00:00.000Z', summary: '前回' }], recent: [{ role: '配信者', text: 'また明日' }] };
+      writeState(before);
+      const ai = scriptedAi({ session: '（なし）' });
+      const mem = makeMem(ai);
+      mem.loadPrevious();
+      mem.add('配信者', 'オルダ、聞こえる?');
+      mem.add('相方', 'はい。');
+      await mem.finalize();
+      const s = state();
+      expect(s.longSummary).toBe('累積');
+      expect(s.pending).toEqual(before.pending);
+      expect(s.recent).toEqual(before.recent);
+      expect(fs.existsSync(sessionsDir)).toBe(false);
+    });
+
+    it('まとめ直しに失敗する: 累積の要約は変えず、今回の要約をまとめ直していないものとして保存する', async () => {
+      writeState({ savedAt: '2026-10-21T13:00:00.000Z', longSummary: '累積', pending: [], recent: [] });
+      const mem = makeMem(scriptedAi({ failMerge: true }));
+      mem.loadPrevious();
+      fill(mem, 3);
+      await mem.finalize();
+      const s = state();
+      expect(s.longSummary).toBe('累積');
+      expect(s.pending.map((p) => p.summary)).toEqual(['- 今回はニブルヘイムを進めた']);
+    });
+
+    it('前回まとめ直せなかった要約がある: 累積・前回・今回の 3 つからまとめ直す', async () => {
+      writeState({ savedAt: '2026-10-21T13:00:00.000Z', longSummary: '累積', pending: [{ at: '2026-10-21T13:00:00.000Z', summary: '前回まとめ損ねた要約' }], recent: [] });
+      const ai = scriptedAi();
+      const mem = makeMem(ai);
+      mem.loadPrevious();
+      fill(mem, 3);
+      await mem.finalize();
+      const merge = ai.models.generateContent.mock.calls.map((c) => c[0].contents).find((p) => p.includes('これまでの配信の要約」を更新'));
+      expect(merge).toContain('累積');
+      expect(merge).toContain('前回まとめ損ねた要約');
+      expect(merge).toContain('- 今回はニブルヘイムを進めた');
+      expect(state().pending).toEqual([]);
     });
 
     it('終了時に要約が失敗する: それまでの要約と発言をそのまま保存する', async () => {
       const ai = { models: { generateContent: vi.fn().mockRejectedValue(new Error('503')) } };
-      const { mem, stateFile } = makeWithState(ai);
+      const mem = makeMem(ai);
       mem.summary = 'それまでの要約';
       fill(mem, 3);
       await mem.finalize();
-      const s = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-      expect(s.summary).toBe('それまでの要約');
-      expect(s.recent).toHaveLength(3);
+      const s = state();
+      expect(s.pending.map((p) => p.summary)).toEqual(['それまでの要約']);
+      expect(s.recent).toHaveLength(1);
     });
 
     it('終了時の要約が 8 秒以内に終わらない: その時点の内容を保存する', async () => {
       vi.useFakeTimers();
       try {
         const ai = { models: { generateContent: vi.fn(() => new Promise(() => {})) } };
-        const { mem, stateFile } = makeWithState(ai);
+        const mem = makeMem(ai);
+        mem.summary = '途中の要約';
         fill(mem, 3);
         const p = mem.finalize();
-        await vi.advanceTimersByTimeAsync(8000);
+        await vi.advanceTimersByTimeAsync(8000 + 60000); // 要約 8 秒 + まとめ直し 60 秒で諦める
         await p;
-        expect(JSON.parse(fs.readFileSync(stateFile, 'utf8')).recent).toHaveLength(3);
+        expect(state().pending.map((x) => x.summary)).toEqual(['途中の要約']);
       } finally {
         vi.useRealTimers();
       }
     });
 
     it('何も話していなければ、要約も保存もしない', async () => {
-      const ai = fakeAi();
-      const { mem, stateFile } = makeWithState(ai);
-      await mem.finalize();
+      const ai = scriptedAi();
+      await makeMem(ai).finalize();
       expect(ai.models.generateContent).not.toHaveBeenCalled();
       expect(fs.existsSync(stateFile)).toBe(false);
     });
@@ -256,14 +352,27 @@ describe('conversation-memory', () => {
       return new Memory({ ai: fakeAi(), model: 'm', maxChars: 1500, recentEntries: 12, persona: 'PERSONA', summaryFile, stateFile });
     };
 
-    it('前回の記憶がある: 指示のペルソナの後ろに、前回の要約と直近の発言を入れる', () => {
-      const mem = stateIn(JSON.stringify({ savedAt: '2026-10-17T13:00:00.000Z', summary: '- 転生クエスト中', recent: [{ role: '配信者', text: 'また明日' }] }));
+    it('前回の記憶がある: 指示のペルソナの後ろに、累積の要約・まとめ直していない要約・直近の発言を入れる', () => {
+      const mem = stateIn(JSON.stringify({
+        savedAt: '2026-10-21T13:00:00.000Z',
+        longSummary: '- 転生クエスト中',
+        pending: [{ at: '2026-10-21T13:00:00.000Z', summary: '- まとめ損ねた回' }],
+        recent: [{ role: '配信者', text: 'また明日' }],
+      }));
       expect(mem.loadPrevious()).toBe(true);
       const inst = mem.instruction();
       expect(inst.indexOf('PERSONA')).toBe(0);
-      expect(inst).toMatch(/# 前回の配信の要約/);
+      expect(inst).toMatch(/# これまでの配信の要約/);
       expect(inst).toContain('- 転生クエスト中');
+      expect(inst).toContain('- まとめ損ねた回');
       expect(inst).toContain('配信者: また明日');
+    });
+
+    it('以前の形式のファイル: その要約を累積の要約として読む', () => {
+      const mem = stateIn(JSON.stringify({ savedAt: '2026-10-17T13:00:00.000Z', summary: '- 以前の形式', recent: [{ role: '配信者', text: 'また明日' }] }));
+      expect(mem.loadPrevious()).toBe(true);
+      expect(mem.longSummary).toBe('- 以前の形式');
+      expect(mem.instruction()).toContain('- 以前の形式');
     });
 
     it('保存された内容が壊れている: 警告して、ペルソナだけで起動する', async () => {
