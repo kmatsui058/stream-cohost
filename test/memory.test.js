@@ -145,6 +145,25 @@ describe('conversation-memory', () => {
     });
   });
 
+  describe('要約に時間の上限を設ける', () => {
+    it('配信中の要約が返ってこない: 120 秒で失敗とし、記録を残して次の機会にやり直す', async () => {
+      vi.useFakeTimers();
+      try {
+        const ai = { models: { generateContent: vi.fn(() => new Promise(() => {})) } };
+        const mem = make(ai, 0, 1);
+        fill(mem, 2);
+        mem.maybeSummarize();
+        await vi.advanceTimersByTimeAsync(120000);
+        expect(mem.summarizing).toBe(null);
+        expect(mem.entries.every((e) => !e.sealed)).toBe(true);
+        mem.maybeSummarize();
+        expect(ai.models.generateContent).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe('要約を重ねて実行しない', () => {
     it('要約中に再度求められる: 1 回だけ実行し、両方が完了を受け取る', async () => {
       let release;
@@ -337,7 +356,7 @@ describe('conversation-memory', () => {
       expect(s.recent).toHaveLength(1);
     });
 
-    it('終了時の要約が 8 秒以内に終わらない: その時点の内容を保存する', async () => {
+    it('終了時の要約が 120 秒以内に終わらない: その時点の内容を保存する', async () => {
       vi.useFakeTimers();
       try {
         const ai = { models: { generateContent: vi.fn(() => new Promise(() => {})) } };
@@ -345,7 +364,7 @@ describe('conversation-memory', () => {
         mem.summary = '途中の要約';
         fill(mem, 3);
         const p = mem.finalize();
-        await vi.advanceTimersByTimeAsync(8000 + 60000); // 要約 8 秒 + まとめ直し 60 秒で諦める
+        await vi.advanceTimersByTimeAsync(120000 + 60000); // 要約 120 秒 + まとめ直し 60 秒で諦める
         await p;
         expect(state().pending.map((x) => x.summary)).toEqual(['途中の要約']);
       } finally {
@@ -457,6 +476,7 @@ describe('conversation-memory', () => {
       expect(req.config.responseSchema.required).toEqual(['summary', 'entries']);
       expect(req.contents).toMatch(/名前だけを書き、詳しい情報は書かない/);
       expect(req.contents).toMatch(/entries[\s\S]*keys[\s\S]*投稿者名/);
+      expect(req.contents).toMatch(/毎回のように出てくる言葉（「マスター」「配信者」「相方」/);
     });
 
     it('要約で視聴者の控えができる: 要約は summary だけになり、項目が作られる', async () => {

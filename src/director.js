@@ -168,7 +168,9 @@ export class Director extends EventEmitter {
   instruction() {
     const base = this.memory.instruction();
     if (!this.lorebook) return base;
-    const lore = this.lorebook.select(this.memory.format(this.memory.entries.slice(-this.lorebook.scanEntries)));
+    // 発言の本文だけを探す（「配信者: 」などの話者の区別では当てない。チャットは本文に投稿者名を含む）
+    const recent = this.memory.entries.slice(-this.lorebook.scanEntries).map((e) => e.text).join('\n');
+    const lore = this.lorebook.select(recent);
     return lore ? `${base}\n\n${lore}` : base;
   }
 

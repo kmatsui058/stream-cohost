@@ -38,6 +38,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       recentEntries: num('RECENT_ENTRIES', 12),
       // 要約していない記録がこの文字数を超えたら要約する
       summarizeAtChars: num('SUMMARIZE_AT_CHARS', 12000),
+      // 要約がこの時間（ms）で返らなければ失敗とし、次の機会にやり直す（控えも一緒に返すので長めに）
+      timeoutMs: num('SUMMARY_TIMEOUT_MS', 120000),
     },
     // 控え（ロアブック）: 直近の記録の何件からキーワードを探すか、当たった後に何回入れたままにするか、1 回に入れる上限の文字数
     lorebook: {

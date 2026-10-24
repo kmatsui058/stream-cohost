@@ -15,7 +15,6 @@ import path from 'node:path';
 import { logger } from './log.js';
 
 const log = logger('memory');
-const FINALIZE_TIMEOUT_MS = 8000;
 const MERGE_TIMEOUT_MS = 60000;
 const STREAM_DESCRIPTION_MAX = 1000;
 // 残すものがないときに要約のモデルが返す言葉
@@ -56,7 +55,7 @@ const withTimeout = (p, ms) => {
 
 export class Memory {
   constructor({
-    ai, model, maxChars, recentEntries, persona, summarizeAtChars = 12000, longMaxChars = 20000,
+    ai, model, maxChars, recentEntries, persona, summarizeAtChars = 12000, longMaxChars = 20000, timeoutMs = 120000,
     stateFile = path.resolve('logs', 'carryover.json'), // 配信をまたいで引き継ぐ記憶
     sessionsDir = path.join(path.dirname(stateFile), 'sessions'), // 各回の要約の履歴
   }) {
@@ -64,6 +63,7 @@ export class Memory {
     this.model = model;
     this.maxChars = maxChars;
     this.longMaxChars = longMaxChars;
+    this.timeoutMs = timeoutMs;
     this.recentEntries = recentEntries;
     this.summarizeAtChars = summarizeAtChars;
     this.persona = persona;
@@ -135,7 +135,7 @@ export class Memory {
 # 出力（JSON）
 - summary: 今回の配信の要約。残すものが何もなければ「${NOTHING}」
 - entries: 言葉ごとの控え。今回の書き起こしで新しく分かったことがある言葉だけ（なければ空）
-  - keys: その言葉と、表記ゆれ・読み・聞き間違いのパターン。視聴者なら、チャットの投稿者名（@ から始まるもの）も入れる
+  - keys: その言葉と、表記ゆれ・読み・聞き間違いのパターン。視聴者なら、チャットの投稿者名（@ から始まるもの）も入れる。毎回のように出てくる言葉（「マスター」「配信者」「相方」、相方の名前など）は使わない
   - content: その言葉について分かっていることの全文。「既にある控え」を更新するときは、同じ keys を使い、今の内容に新しく分かったことを足した全文にする。単独で意味が通るように書く
 
 # すでに与えている情報（相方への指示として別に渡している）
@@ -197,11 +197,14 @@ ${unmerged}`;
     this.summarizing = (async () => {
       const t0 = Date.now();
       try {
-        const res = await this.ai.models.generateContent({
-          model: this.model,
-          contents: this.buildPrompt(old),
-          config: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA },
-        });
+        const res = await withTimeout(
+          this.ai.models.generateContent({
+            model: this.model,
+            contents: this.buildPrompt(old),
+            config: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA },
+          }),
+          this.timeoutMs,
+        );
         const { summary: text, entries } = parseSummary(res.text);
         if (!text) throw new Error('要約が空でした');
         this.summary = text;
@@ -244,7 +247,8 @@ ${unmerged}`;
     if (!this.summary && !this.entries.length) return;
     this.lastRecent = this.entries.slice(-this.recentEntries);
     try {
-      await withTimeout(this.summarize(0), FINALIZE_TIMEOUT_MS);
+      log.info(`終了時の要約を作っています（最大 ${this.timeoutMs / 1000} 秒）`);
+      await withTimeout(this.summarize(0), this.timeoutMs);
     } catch (e) {
       log.warn(`終了時の要約に失敗したので、その時点の内容を保存します: ${e.message}`);
     }

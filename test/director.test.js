@@ -364,6 +364,22 @@ describe('lorebook / 進行役とのつなぎ', () => {
     expect(inst).not.toContain('死者の国');
   });
 
+  it('話者の区別では当たらない: 「配信者: 」の部分は探さない', () => {
+    const lorebook = lore();
+    lorebook.add({ keys: ['配信者'], content: '好み' });
+    const { director, responder } = setup({ lorebook });
+    director.onUtterance('オルダ、こんにちは');
+    expect(responder.calls[0].req.instruction).not.toContain('好み');
+  });
+
+  it('チャットの投稿者名では当たる', () => {
+    const lorebook = lore();
+    lorebook.add({ keys: ['@AtelierDokan'], content: '常連のドカンさん' });
+    const { director, responder } = setup({ lorebook });
+    director.addChat([{ author: '@AtelierDokan', text: 'オルダさんこんばんは' }]);
+    expect(responder.calls[0].req.instruction).toContain('常連のドカンさん');
+  });
+
   it('退去したら、入れたままの控えを外す', async () => {
     const lorebook = lore();
     lorebook.add({ keys: ['ごつミノ'], content: 'ごつミノは一般モンスター' });
