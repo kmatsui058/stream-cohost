@@ -77,6 +77,7 @@ export class Speaker extends EventEmitter {
   setVolume(level) {
     if (level === this.volume) return;
     this.volume = level;
+    log.info(level < 1 ? `🔉 声を小さくする (${level})` : '🔊 声を元の音量に戻す');
     this.overlay.broadcast({ type: 'volume', level });
   }
 
