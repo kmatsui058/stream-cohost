@@ -219,15 +219,28 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
   });
 
   describe('問い合わせの失敗で止まらない', () => {
-    it('問い合わせがエラーになる: エラーを記録し、何も読み上げず、次の発話で再び問い合わせる', async () => {
+    it('1 回目だけ返ってこない: 自動で 1 回やり直し、話さなくても返事を読み上げる', async () => {
+      const { director, responder, speaker } = setup();
+      director.onUtterance('オルダ、聞こえる?');
+      responder.calls.shift().reject(new Error('タイムアウト'));
+      await flush();
+      expect(responder.ask).toHaveBeenCalledTimes(2);
+      await responder.reply('はい、聞こえます。');
+      expect(speaker.pushed).toEqual(['はい、聞こえます。']);
+      expect(await readLog()).toMatch(/WARN .*問い合わせに失敗したので、もう一度問い合わせます: タイムアウト/);
+    });
+
+    it('問い合わせがエラーになる: やり直しも失敗したらエラーを記録し、何も読み上げず、次の発話で再び問い合わせる', async () => {
       const { director, responder, speaker } = setup();
       director.onUtterance('オルダ');
+      responder.calls.shift().reject(new Error('503'));
+      await flush();
       responder.calls.shift().reject(new Error('503'));
       await flush();
       expect(speaker.pushed).toEqual([]);
       expect(director.summoned).toBe(true);
       director.onUtterance('聞こえる?');
-      expect(responder.ask).toHaveBeenCalledTimes(2);
+      expect(responder.ask).toHaveBeenCalledTimes(3);
       expect(await readLog()).toMatch(/ERROR .*問い合わせに失敗/);
     });
   });

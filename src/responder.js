@@ -23,6 +23,7 @@ export class Responder {
       parts.push({ text: NO_FRAMES_NOTE });
     }
     parts.push({ text: CLOSING });
+    log.info(`問い合わせ中（画面 ${frames.length} 枚・指示 ${instruction.length} 字・記録 ${transcript.length} 字）`);
     const t0 = Date.now();
     let timer;
     try {
