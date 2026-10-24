@@ -5,7 +5,7 @@ body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
 /*
  * --brightness（0.7〜1）と .speaking は overlay-core.js が音量に合わせて更新する。
  * .has-character は立ち絵フォルダに default.png と smile.png がそろっているときに付く。
- * .present は相方が召喚されている間だけ付く。
+ * .present は相方が召喚されている間だけ付く。.awake は召喚後に最初の音声を再生するときに付き、退去まで残る。
  */
 #cohost {
   --brightness: 0.7;
@@ -22,9 +22,10 @@ body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
 }
 #cohost.has-character { --sub-left: 300px; }
 
-/* 召喚中（.present）だけ相方を表示する。退去するとふわっと消える */
+/* 召喚中（.present）だけ相方を表示する。召喚直後は薄く、話し始める直前（.awake）にはっきりさせる。退去するとふわっと消える */
 #avatar { opacity: 0; transition: opacity 0.6s; }
-.present #avatar { opacity: 1; }
+.present #avatar { opacity: 0.3; }
+.present.awake #avatar { opacity: 1; transition-duration: 0.2s; }
 
 /* 明るさを掛ける層。filter を掛けた要素は中の配置の基準になるので、画面全体の大きさにしておく */
 #avatar { position: fixed; inset: 0; pointer-events: none; filter: brightness(var(--brightness)); }

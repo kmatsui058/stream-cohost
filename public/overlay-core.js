@@ -3,6 +3,7 @@
 // サーバーから {type:'say', id, text, wav(base64)} を受けたら再生し、終わったら {type:'ended', id} を返す。
 // {type:'stop'} で再生中の音声を止める。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
 // {type:'presence', visible} で相方を出す／消す（root の present クラス → CSS で表示を切り替え）。
+// 召喚直後は薄く出し、最初の音声を再生する直前に root に awake を付けてはっきりさせる（退去まで付けたまま）。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
 export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
@@ -88,6 +89,7 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       src.buffer = buf;
       src.connect(analyser);
       current = { id, src };
+      el.root.classList.add('awake'); // 話し始める直前にはっきり表示する
       el.sub.textContent = text;
       el.sub.classList.add('show');
       src.onended = () => {
@@ -120,7 +122,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
         el.root.classList.toggle('has-character', !!m.character);
         el.root.classList.toggle('present', !!m.present);
       }
-      if (m.type === 'presence') el.root.classList.toggle('present', !!m.visible);
+      if (m.type === 'presence') {
+        el.root.classList.toggle('present', !!m.visible);
+        el.root.classList.remove('awake'); // 召喚し直したら、また薄い表示から始める
+      }
     };
     // サーバー未起動・再起動時は赤字で表示して再接続（配信に映るのが嫌なら #status を消してよい）
     ws.onclose = () => {
