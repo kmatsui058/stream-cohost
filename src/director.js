@@ -56,7 +56,7 @@ export class Director extends EventEmitter {
   }
 
   onUtterance(text) {
-    log.debug(`🎤 ${text}`);
+    log.info(`🎤 ${text}`);
     this.memory.add('配信者', text);
     // 相方が喋っている最中に配信者が話したら、設定に従って止める（duck なら話し終えたので音量を戻す）
     if (this.cfg.bargeIn === 'stop' && this.speaker.speaking && text.trim().length >= 2) this.speaker.stop();
