@@ -431,19 +431,13 @@ describe('conversation-memory', () => {
   });
 
   describe('要約を確認できるようにする', () => {
-    it('要約が更新された: ファイルを最新の内容と時刻で上書きし、ログにも記録する', async () => {
-      const mem = make(fakeAi('一回目'), 0);
+    it('要約が更新された: ログに要約の内容を記録し、要約だけのファイルは作らない', async () => {
+      const mem = make(fakeAi('二回目の要約の中身'), 0);
       fill(mem, 1);
       await mem.summarize();
-      mem.ai = fakeAi('二回目');
-      fill(mem, 1);
-      await mem.summarize();
-      const file = fs.readFileSync(summaryFile, 'utf8');
-      expect(file).toMatch(/^# \d{4}\/\d{1,2}\/\d{1,2} /);
-      expect(file).toContain('二回目');
-      expect(file).not.toContain('一回目');
+      expect(fs.existsSync(summaryFile)).toBe(false);
       await new Promise((r) => setTimeout(r, 50));
-      expect(fs.readFileSync(logFilePath(), 'utf8')).toContain('要約を更新');
+      expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/要約を更新[^\n]*\n二回目の要約の中身/);
     });
   });
 });

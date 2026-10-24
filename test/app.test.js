@@ -31,7 +31,6 @@ describe('組み立てと操作', () => {
       obsClient: fakeObs(),
       fetch: vi.fn(async () => ({ ok: true, text: async () => '"0.25.2"' })),
       synthesize: async () => silentWav(1),
-      summaryFile: path.join(tmp, 'summary.txt'),
       stateFile: path.join(tmp, 'carryover.json'),
       carryOver,
       onQuit,

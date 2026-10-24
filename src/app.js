@@ -33,7 +33,6 @@ export function createApp(config, deps = {}) {
   const responder = new Responder(config.responder, ai);
   const memory = new Memory({
     ai, persona: config.gemini.persona, ...config.memory,
-    ...(deps.summaryFile && { summaryFile: deps.summaryFile }),
     ...(deps.stateFile && { stateFile: deps.stateFile }),
   });
   const speaker = new Speaker(overlay, config.voicevox, {
