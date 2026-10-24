@@ -86,6 +86,7 @@ export function createApp(config, deps = {}) {
   }
 
   let stopped = false;
+  let quit = false;
   async function shutdown() {
     if (stopped) return;
     stopped = true;
@@ -93,9 +94,20 @@ export function createApp(config, deps = {}) {
     mic.stop();
     obs.stop();
     chat.stop();
-    await memory.finalize(); // 要約して保存してから閉じる
-    listener.close();
+    listener.close(); // 記憶を保存している間に再接続しないよう、先に閉じる
+    log.info(`記憶を保存しています（最大 ${(memory.timeoutMs * 2) / 1000} 秒）。待たずに終わるなら、もう一度 q`);
+    await memory.finalize(); // 今回分を要約し、これまでの配信の要約とまとめ直して保存する
     await overlay.close();
+  }
+
+  // 1 回目の q で記憶を保存してから終わる。保存中の 2 回目の q で、その時点の記憶を保存してすぐ終わる
+  function quitCommand() {
+    if (quit) return;
+    if (!stopped) return shutdown().then(() => { if (!quit) { quit = true; onQuit(); } });
+    quit = true;
+    log.info('記憶の保存を打ち切って終了します（その時点の内容を保存）');
+    memory.save();
+    onQuit();
   }
 
   // k キーワード,キーワード = 内容
@@ -106,7 +118,8 @@ export function createApp(config, deps = {}) {
   }
 
   function handleCommand(line) {
-    const [cmd, ...rest] = line.trim().split(' ');
+    // 全角の英数字・空白でも受け付ける
+    const [cmd, ...rest] = line.normalize('NFKC').trim().split(' ');
     const arg = rest.join(' ').trim();
     switch (cmd) {
       case 'p': director.setPaused(!director.paused); break;
@@ -119,7 +132,7 @@ export function createApp(config, deps = {}) {
       case 'v': chat.start(arg); break;
       case 'r': memory.summarize().catch((e) => log.warn(`要約に失敗しました: ${e.message}`)); break;
       case 'm': log.info(`現在の記憶\n${memory.instruction().slice(config.gemini.persona.length).trim() || '（要約なし）'}\n\n# 要約以降の記録\n${memory.transcript() || '（なし）'}`); break;
-      case 'q': return shutdown().then(onQuit);
+      case 'q': return quitCommand();
       default: log.info(HELP);
     }
   }

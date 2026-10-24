@@ -177,7 +177,7 @@ describe('組み立てと操作', () => {
       expect(asks()[0].config.systemInstruction).toBe('PERSONA');
     });
 
-    it('終了する: 記憶を保存してからセッションを閉じる', async () => {
+    it('終了する: 聞く役のセッションを閉じてから記憶を保存する', async () => {
       await build();
       app.memory.add('配信者', '今日はここまで');
       let closedWhenSaved;
@@ -187,8 +187,7 @@ describe('組み立てと操作', () => {
         save();
       };
       await app.handleCommand('q');
-      expect(closedWhenSaved).toBe(false);
-      expect(live.last().closed).toBe(true);
+      expect(closedWhenSaved).toBe(true);
       const s = JSON.parse(fs.readFileSync(path.join(tmp, 'carryover.json'), 'utf8'));
       expect(s.recent).toEqual([{ role: '配信者', text: '今日はここまで' }]);
     });
@@ -200,6 +199,44 @@ describe('組み立てと操作', () => {
       await app.handleCommand('q');
       expect(sp.last().killed).toBe(true);
       expect(live.last().closed).toBe(true);
+      expect(onQuit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('operator-controls / 終了処理（記憶の保存中）', () => {
+    const hangSummary = () => {
+      live.ai.models.generateContent = vi.fn((req) => (req.model === 'gemini-4-argon' ? Promise.resolve({ text: 'はい。' }) : new Promise(() => {})));
+    };
+
+    it('記憶の保存中に再接続しない: 聞く役のセッションが切れても張り直さない', async () => {
+      await build();
+      hangSummary();
+      app.memory.add('配信者', '今日はここまで');
+      app.handleCommand('q');
+      live.last().drop();
+      await new Promise((r) => setTimeout(r, 1200));
+      expect(live.sessions).toHaveLength(1);
+      expect(await readLog()).toMatch(/記憶を保存しています（最大 \d+ 秒）。待たずに終わるなら、もう一度 q/);
+      app.handleCommand('q');
+    });
+
+    it('保存を待たずに終わる: 保存中にもう一度 q で、その時点の記憶を保存してすぐ終わる', async () => {
+      await build();
+      hangSummary();
+      app.memory.add('配信者', '途中まで');
+      app.handleCommand('q');
+      expect(onQuit).not.toHaveBeenCalled();
+      app.handleCommand('q');
+      expect(onQuit).toHaveBeenCalledTimes(1);
+      const s = JSON.parse(fs.readFileSync(path.join(tmp, 'carryover.json'), 'utf8'));
+      expect(s.recent).toEqual([{ role: '配信者', text: '途中まで' }]);
+      app.handleCommand('q');
+      expect(onQuit).toHaveBeenCalledTimes(1);
+    });
+
+    it('全角で入力する: ｑ でも終了する', async () => {
+      await build();
+      await app.handleCommand('ｑ');
       expect(onQuit).toHaveBeenCalledTimes(1);
     });
   });

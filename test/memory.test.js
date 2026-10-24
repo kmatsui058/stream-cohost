@@ -364,7 +364,7 @@ describe('conversation-memory', () => {
         mem.summary = '途中の要約';
         fill(mem, 3);
         const p = mem.finalize();
-        await vi.advanceTimersByTimeAsync(120000 + 60000); // 要約 120 秒 + まとめ直し 60 秒で諦める
+        await vi.advanceTimersByTimeAsync(120000 + 120000); // 要約 120 秒 + まとめ直し 120 秒で諦める
         await p;
         expect(state().pending.map((x) => x.summary)).toEqual(['途中の要約']);
       } finally {
