@@ -114,6 +114,18 @@ describe('conversation-memory', () => {
       expect(prompt).toMatch(/すでに与えている情報.*繰り返さない/);
     });
 
+    it('前回の振り返りだけの回: これまでの配信の要約を添え、振り返りを今回の出来事として残さないよう指示する', async () => {
+      const ai = fakeAi();
+      const mem = make(ai, 0);
+      mem.longSummary = '- 10/21: The Sign を授与された';
+      mem.add('配信者', '前回のお話の要約を教えてくれる？');
+      mem.add('相方', '前回は The Sign を授与されました。');
+      await mem.summarize();
+      const prompt = ai.models.generateContent.mock.calls[0][0].contents;
+      expect(prompt).toMatch(/# すでに与えている情報[\s\S]*これまでの配信の要約[\s\S]*- 10\/21: The Sign を授与された[\s\S]*# これまでの要約/);
+      expect(prompt).toMatch(/過去の配信を振り返って話しただけの内容は、今回の出来事として残さない/);
+    });
+
     it('要約が空で返った: 失敗とし、記録と前回の要約を変えない', async () => {
       const mem = make(fakeAi('  '), 0);
       mem.summary = '前回';
@@ -251,6 +263,8 @@ describe('conversation-memory', () => {
       expect(merge).toContain('- 今回はニブルヘイムを進めた');
       expect(merge).toMatch(/古い配信ほど要点/);
       expect(merge).toMatch(/動作確認/);
+      expect(merge).toMatch(/書かれていない出来事を作らない/);
+      expect(merge).toMatch(/新しい出来事のない回には見出しを立てない/);
       const s = state();
       expect(s.longSummary).toBe('# 累積\n- 10/18 と 10/21 と今回');
       expect(s.pending).toEqual([]);
