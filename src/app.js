@@ -61,6 +61,7 @@ export function createApp(config, deps = {}) {
   listener.on('utterance', (text) => director.onUtterance(text));
   listener.on('interim', (text) => director.onInterim(text));
   director.on('presence', (visible) => overlay.setPresence(visible));
+  director.on('thinking', (on) => overlay.setThinking(on));
   obs.on('frame', (jpeg) => {
     frames.push(jpeg);
     if (frames.length > config.responder.frames) frames.shift();

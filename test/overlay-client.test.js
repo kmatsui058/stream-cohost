@@ -40,6 +40,44 @@ describe('stream-overlay（画面側）', () => {
     });
   });
 
+  describe('考え中を表示する', () => {
+    const loading = () => el.sub.classList.contains('loading') && el.sub.classList.contains('show');
+    const thinkingClass = () => el.root.classList.contains('thinking');
+
+    it('考え中になって返事が届く: 考え中の表情と「…」を出し、終わると戻す', () => {
+      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFace: true });
+      sockets.last().receive({ type: 'thinking', on: true });
+      expect(thinkingClass()).toBe(true);
+      expect(el.root.classList.contains('has-thinking-face')).toBe(true);
+      expect(loading()).toBe(true);
+      sockets.last().receive({ type: 'thinking', on: false });
+      expect(thinkingClass()).toBe(false);
+      expect(loading()).toBe(false);
+    });
+
+    it('再生中に考え中になる: 再生中は「…」を出さず、再生が終わってまだ考え中なら出す', async () => {
+      await play(1, 'はい。');
+      sockets.last().receive({ type: 'thinking', on: true });
+      expect(loading()).toBe(false);
+      expect(el.sub.textContent).toBe('はい。');
+      ctx.sources[0].onended();
+      expect(loading()).toBe(true);
+    });
+
+    it('「…」を出している間に再生が始まる: 「…」を消して字幕を出す', async () => {
+      sockets.last().receive({ type: 'thinking', on: true });
+      await play(1, 'はい。');
+      expect(el.sub.classList.contains('loading')).toBe(false);
+      expect(el.sub.textContent).toBe('はい。');
+    });
+
+    it('考え中の画像がない: 表情用の印は付けず、「…」だけ出す', () => {
+      sockets.last().receive({ type: 'profile', name: 'x', character: true, thinkingFace: false, thinking: true });
+      expect(el.root.classList.contains('has-thinking-face')).toBe(false);
+      expect(loading()).toBe(true);
+    });
+  });
+
   describe('再生音量を変える', () => {
     it('音量の指示を受ける: 再生音量が 0.3 に向かって変わり、1 で戻る', () => {
       sockets.last().receive({ type: 'volume', level: 0.3 });

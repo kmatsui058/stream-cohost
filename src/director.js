@@ -46,6 +46,7 @@ export class Director extends EventEmitter {
     this.shown = false; // 画面に相方を出しているか（退去後も読み上げが終わるまで出しておく）
     this.busy = false; // 問い合わせ中
     this.pending = false; // 問い合わせ中に新しい発話が届いた
+    this.thinking = false; // 画面に考え中を出しているか
     this.paused = false;
     this.releaseTimer = null; // 小さくした声を元に戻すタイマー
     speaker.on('idle', () => this.hideIfDismissed());
@@ -127,13 +128,23 @@ export class Director extends EventEmitter {
       return;
     }
     this.busy = true;
+    this.setThinking(true); // 問い合わせ中（画面に考え中を出す）
     this.ask().finally(() => {
       this.busy = false;
       if (this.pending && this.summoned && !this.paused) {
         this.pending = false;
-        this.request();
+        this.request(); // 考え中のまま、もう 1 回問い合わせる
+        return;
       }
+      this.setThinking(false);
     });
+  }
+
+  // 考え中かどうかが変わったときだけ知らせる
+  setThinking(on) {
+    if (this.thinking === on) return;
+    this.thinking = on;
+    this.emit('thinking', on);
   }
 
   async ask() {
