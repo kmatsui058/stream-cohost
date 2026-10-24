@@ -194,4 +194,37 @@ describe('speech-output', () => {
       expect(fs.readFileSync(logFilePath(), 'utf8')).toMatch(/WARN .*オーバーレイ未接続/);
     });
   });
+  describe('声を小さくする', () => {
+    const volumes = () => overlay.sent.filter((m) => m.type === 'volume').map((m) => m.level);
+
+    it('小さくして戻す: 同じ音量は送らず、0.3 と 1 が 1 回ずつ届く', async () => {
+      const sp = new Speaker(overlay, vv, { synthesize: async () => silentWav(1) });
+      sp.push('一。');
+      await tick();
+      sp.setVolume(0.3);
+      sp.setVolume(0.3);
+      sp.setVolume(1);
+      expect(volumes()).toEqual([0.3, 1]);
+    });
+
+    it('小さいまま喋り終える: 音量 1 に戻す', async () => {
+      const sp = new Speaker(overlay, vv, { synthesize: async () => silentWav(1) });
+      sp.push('一。');
+      await tick();
+      sp.setVolume(0.3);
+      overlay.end();
+      await tick();
+      expect(sp.speaking).toBe(false);
+      expect(volumes()).toEqual([0.3, 1]);
+    });
+
+    it('小さいまま中断される: 音量 1 に戻す', async () => {
+      const sp = new Speaker(overlay, vv, { synthesize: async () => silentWav(1) });
+      sp.push('一。');
+      await tick();
+      sp.setVolume(0.3);
+      sp.stop();
+      expect(volumes()).toEqual([0.3, 1]);
+    });
+  });
 });

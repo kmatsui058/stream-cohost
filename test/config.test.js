@@ -19,12 +19,19 @@ describe('operator-controls / 設定の既定値を使う', () => {
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
     expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
     expect(c.overlay).toEqual({ port: 8787, displayName: 'ORÐA-VÁR', characterDir: '' });
-    expect(c.director).toEqual({ bargeIn: true, gateMicWhileSpeaking: false });
+    expect(c.director).toEqual({ bargeIn: 'duck', duckVolume: 0.3, duckReleaseMs: 1000, gateMicWhileSpeaking: false });
     expect(c.youtube.pollMinMs).toBe(10000);
   });
 
+  it('割り込み時の動作: duck / stop / off。1・true は stop、0・false は off', () => {
+    const mode = (v) => loadConfig({ BARGE_IN: v }, readPersona).director.bargeIn;
+    expect([mode('duck'), mode('stop'), mode('off')]).toEqual(['duck', 'stop', 'off']);
+    expect([mode('1'), mode('true'), mode('0'), mode('false')]).toEqual(['stop', 'stop', 'off', 'off']);
+    const c = loadConfig({ DUCK_VOLUME: '0.5', DUCK_RELEASE_MS: '2000' }, readPersona).director;
+    expect([c.duckVolume, c.duckReleaseMs]).toEqual([0.5, 2000]);
+  });
+
   it('真偽値の指定: 0 は偽、1 と true は真として扱う', () => {
-    expect(loadConfig({ BARGE_IN: '0' }, readPersona).director.bargeIn).toBe(false);
     expect(loadConfig({ GATE_MIC_WHILE_SPEAKING: '1' }, readPersona).director.gateMicWhileSpeaking).toBe(true);
     expect(loadConfig({ GATE_MIC_WHILE_SPEAKING: 'true' }, readPersona).director.gateMicWhileSpeaking).toBe(true);
   });

@@ -13,6 +13,8 @@ function fakeSpeaker() {
   s.pushed = [];
   s.push = vi.fn((t) => s.pushed.push(t));
   s.stop = vi.fn();
+  s.volumes = [];
+  s.setVolume = vi.fn((v) => s.volumes.push(v));
   return s;
 }
 
@@ -48,7 +50,7 @@ function setup({ cfg = {}, frames = [] } = {}) {
   const presence = [];
   const director = new Director({
     responder, speaker, memory,
-    cfg: { bargeIn: true, ...cfg },
+    cfg: { bargeIn: 'duck', duckVolume: 0.3, duckReleaseMs: 1000, ...cfg },
     summonWords: ['オルダ', 'ヴァール'],
     getFrames: () => frames,
   });
@@ -229,24 +231,64 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
   });
 
   describe('配信者が話し始めたら黙る', () => {
-    it('相方の発話中に配信者が話す: 発話が止まる', () => {
-      const { director, speaker } = setup();
+    it('相方の発話中に配信者が話す（stop）: 発話が止まる', () => {
+      const { director, speaker } = setup({ cfg: { bargeIn: 'stop' } });
       speaker.speaking = true;
       director.onUtterance('ちょっと待って');
       expect(speaker.stop).toHaveBeenCalled();
     });
 
-    it('短い雑音: 1 文字では止まらない', () => {
-      const { director, speaker } = setup();
+    it('短い雑音（stop）: 1 文字では止まらない', () => {
+      const { director, speaker } = setup({ cfg: { bargeIn: 'stop' } });
       speaker.speaking = true;
       director.onUtterance('あ');
       expect(speaker.stop).not.toHaveBeenCalled();
     });
 
-    it('設定で無効にしていれば止まらない', () => {
-      const { director, speaker } = setup({ cfg: { bargeIn: false } });
+    it('話しかぶせると声が小さくなる（duck）: 途中経過で 0.3 に下げ、止めない', () => {
+      const { director, speaker } = setup();
       speaker.speaking = true;
+      director.onInterim('ちょっと');
+      expect(speaker.volumes).toEqual([0.3]);
       director.onUtterance('ちょっと待って');
+      expect(speaker.stop).not.toHaveBeenCalled();
+    });
+
+    it('相方が喋っていない・1 文字だけの途中経過（duck）: 下げない', () => {
+      const { director, speaker } = setup();
+      director.onInterim('ちょっと');
+      speaker.speaking = true;
+      director.onInterim('あ');
+      expect(speaker.volumes).toEqual([]);
+    });
+
+    it('話し終えると元に戻る（duck）: 発話が確定したら 1 に戻す', () => {
+      const { director, speaker } = setup();
+      speaker.speaking = true;
+      director.onInterim('ちょっと');
+      director.onUtterance('ちょっと待って');
+      expect(speaker.volumes).toEqual([0.3, 1]);
+    });
+
+    it('途中経過が途切れると元に戻る（duck）: 最後の途中経過から 1,000 ミリ秒で 1 に戻す', () => {
+      vi.useFakeTimers();
+      const { director, speaker } = setup();
+      speaker.speaking = true;
+      director.onInterim('ちょっと');
+      vi.advanceTimersByTime(800);
+      director.onInterim('ちょっと待');
+      vi.advanceTimersByTime(800);
+      expect(speaker.volumes.at(-1)).toBe(0.3);
+      vi.advanceTimersByTime(200);
+      expect(speaker.volumes.at(-1)).toBe(1);
+    });
+
+    it('何もしない（off）: 声も発話も変わらない', () => {
+      const { director, speaker } = setup({ cfg: { bargeIn: 'off' } });
+      speaker.speaking = true;
+      director.onInterim('ちょっと');
+      director.onUtterance('ちょっと待って');
+      expect(speaker.volumes).toEqual([]);
       expect(speaker.stop).not.toHaveBeenCalled();
     });
   });

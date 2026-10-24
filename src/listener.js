@@ -72,7 +72,9 @@ export class Listener extends EventEmitter {
       this.switchSession();
       return;
     }
-    // 途中経過（interimInputTranscription）は使わず、確定したものだけを発話として伝える
+    // 途中経過（interimInputTranscription）は「話している途中」として、確定したものだけを発話として伝える
+    const interim = m.serverContent?.interimInputTranscription?.text?.trim();
+    if (interim) this.emit('interim', interim);
     const text = m.serverContent?.inputTranscription?.text?.trim();
     if (text) this.emit('utterance', text);
   }
