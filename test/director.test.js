@@ -57,7 +57,9 @@ function setup({ cfg = {}, frames = [], lorebook } = {}) {
     lorebook,
   });
   director.on('presence', (v) => presence.push(v));
-  return { director, memory, speaker, responder, presence };
+  const thinking = [];
+  director.on('thinking', (v) => thinking.push(v));
+  return { director, memory, speaker, responder, presence, thinking };
 }
 
 describe('turn-taking / answering（召喚・会話・退去）', () => {
@@ -215,6 +217,37 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
       director.toggleSummon();
       expect(director.summoned).toBe(false);
       expect(presence).toEqual([true, false]);
+    });
+  });
+
+  describe('問い合わせ中であることを知らせる', () => {
+    it('召喚して返事が届く: 問い合わせの開始で考え中、返事で終わる', async () => {
+      const { director, responder, thinking } = setup();
+      director.onUtterance('オルダ');
+      expect(thinking).toEqual([true]);
+      await responder.reply('はい。');
+      expect(thinking).toEqual([true, false]);
+    });
+
+    it('問い合わせ中に話す: もう 1 回問い合わせる間も考え中が続く', async () => {
+      const { director, responder, thinking } = setup();
+      director.onUtterance('オルダ');
+      director.onUtterance('続き');
+      await responder.reply('スルー');
+      expect(thinking).toEqual([true]);
+      await responder.reply('はい。');
+      expect(thinking).toEqual([true, false]);
+    });
+
+    it('問い合わせに失敗する: やり直しも失敗したら考え中が終わる', async () => {
+      const { director, responder, thinking } = setup();
+      director.onUtterance('オルダ');
+      responder.calls.shift().reject(new Error('503'));
+      await flush();
+      expect(thinking).toEqual([true]);
+      responder.calls.shift().reject(new Error('503'));
+      await flush();
+      expect(thinking).toEqual([true, false]);
     });
   });
 

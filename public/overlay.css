@@ -5,6 +5,7 @@ body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
 /*
  * --brightness（0.7〜1）と .speaking は overlay-core.js が音量に合わせて更新する。
  * .has-character は立ち絵フォルダに default.png と smile.png がそろっているときに付く。
+ * .thinking は答える役に問い合わせている間、.has-thinking-face は考え中の画像（misterious.png）があるときに付く。
  * .present は相方が召喚されている間だけ付く。.awake は召喚後に最初の音声を再生するときに付き、退去まで残る。
  */
 #cohost {
@@ -39,6 +40,9 @@ body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
 .portrait img { display: block; width: 100%; height: auto; }
 .portrait .face-smile { position: absolute; left: 0; top: 0; opacity: 0; transition: opacity 0.08s; }
 .speaking .portrait .face-smile { opacity: 1; }
+/* 考え中（答える役に問い合わせ中）の表情。喋り始めたら smile が優先 */
+.portrait .face-thinking { position: absolute; left: 0; top: 0; opacity: 0; transition: opacity 0.15s; }
+.has-thinking-face.thinking:not(.speaking) .portrait .face-thinking { opacity: 1; }
 
 /* SOUND ONLY と表示名 */
 .badge { position: absolute; left: 24px; bottom: 24px; }
@@ -73,5 +77,8 @@ body { font-family: "BIZ UDPGothic", "Yu Gothic UI", "Segoe UI", sans-serif; }
   opacity: 0; transition: opacity 0.2s;
 }
 #sub.show { opacity: 1; }
+/* 考え中は字幕の位置に「…」を点滅させる */
+#sub.loading::after { content: '…'; animation: loading-blink 1s steps(2, start) infinite; }
+@keyframes loading-blink { to { visibility: hidden; } }
 
 #status { position: absolute; left: 8px; top: 8px; color: #f55; font-size: 14px; }

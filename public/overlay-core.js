@@ -4,6 +4,7 @@
 // {type:'stop'} で再生中の音声を止める。{type:'volume', level} で再生音量をなめらかに変える。{type:'profile', name, character, present} で表示名と立ち絵の有無を受け取る。
 // {type:'presence', visible} で相方を出す／消す（root の present クラス → CSS で表示を切り替え）。
 // 召喚直後は薄く出し、最初の音声を再生する直前に root に awake を付けてはっきりさせる（退去まで付けたまま）。
+// {type:'thinking', on} の間は root に thinking を付け（考え中の表情）、再生中でなければ字幕の位置に「…」を出す。
 // 喋っていることは、表示の明るさ（--brightness）と、立ち絵の表情（root の speaking クラス → CSS で smile に切り替え）で伝える。
 
 export const DIM = 0.7; // 喋っていないときの明るさ（少し暗い）
@@ -50,6 +51,16 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
   let speaking = false;
   let current = null; // { id, src }
   let ws = null;
+  let thinking = false; // 考え中（答える役に問い合わせ中）
+
+  // 考え中で、再生中の字幕がなければ、字幕の位置に点滅する「…」を出す（CSS の .loading）
+  function updateLoading() {
+    if (current) return;
+    const on = thinking;
+    if (on) el.sub.textContent = '';
+    el.sub.classList.toggle('loading', on);
+    el.sub.classList.toggle('show', on);
+  }
 
   function send(msg) {
     try {
@@ -81,6 +92,7 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
     } catch {}
     current = null;
     el.sub.classList.remove('show');
+    updateLoading();
   }
 
   async function say({ id, text, wav }) {
@@ -93,12 +105,14 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       src.connect(analyser);
       current = { id, src };
       el.root.classList.add('awake'); // 話し始める直前にはっきり表示する
+      el.sub.classList.remove('loading');
       el.sub.textContent = text;
       el.sub.classList.add('show');
       src.onended = () => {
         if (current?.id !== id) return;
         current = null;
         el.sub.classList.remove('show');
+        updateLoading();
         send({ type: 'ended', id });
       };
       src.start();
@@ -106,6 +120,12 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
       console.error(err);
       send({ type: 'ended', id }); // 再生できなくても完了扱いにしてサーバーを先に進める
     }
+  }
+
+  function setThinking(on) {
+    thinking = on;
+    el.root.classList.toggle('thinking', on);
+    updateLoading();
   }
 
   function start() {
@@ -125,7 +145,10 @@ export function createOverlayClient({ audioContext: ctx, connect: openSocket, el
         el.name.textContent = m.name ?? '';
         el.root.classList.toggle('has-character', !!m.character);
         el.root.classList.toggle('present', !!m.present);
+        el.root.classList.toggle('has-thinking-face', !!m.thinkingFace);
+        setThinking(!!m.thinking);
       }
+      if (m.type === 'thinking') setThinking(!!m.on);
       if (m.type === 'presence') {
         el.root.classList.toggle('present', !!m.visible);
         el.root.classList.remove('awake'); // 召喚し直したら、また薄い表示から始める
