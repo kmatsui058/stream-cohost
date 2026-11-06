@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import fs from 'node:fs';
-import { Responder, NO_FRAMES_NOTE } from '../src/responder.js';
+import { Responder, NO_FRAMES_NOTE, CLOSING } from '../src/responder.js';
 import { logFilePath } from '../src/log.js';
 
 const cfg = { model: 'gemini-4-argon', timeoutMs: 60000 };
@@ -49,6 +49,34 @@ describe('answering / 召喚中の発話に答える（問い合わせの中身�
     const done = expect(p).rejects.toThrow('タイムアウト');
     await vi.advanceTimersByTimeAsync(1000);
     await done;
+  });
+
+  describe('返事を促さない・召喚のきっかけを伝える', () => {
+    it('問い合わせの締めの文: 返事をするか黙るかを決めさせ、返事を促す言葉を含まない', async () => {
+      const ai = fakeAi(async () => ({ text: 'スルー' }));
+      await new Responder(cfg, ai).ask({ instruction: '', transcript: '配信者: よし。', frames: [] });
+      const parts = ai.models.generateContent.mock.calls[0][0].contents[0].parts;
+      expect(parts.at(-1).text).toBe(CLOSING);
+      expect(CLOSING).toMatch(/返事をするか.*スルー/);
+      expect(CLOSING).not.toMatch(/返事をしてください/);
+    });
+
+    it('召喚のきっかけがある: 締めの文の前に書き添える。なければ書き添えない', async () => {
+      const ai = fakeAi(async () => ({ text: 'スルー' }));
+      const r = new Responder(cfg, ai);
+      await r.ask({ instruction: '', transcript: '', frames: [], summonNote: '# 召喚のきっかけ\nヴァール' });
+      await r.ask({ instruction: '', transcript: '', frames: [] });
+      const first = ai.models.generateContent.mock.calls[0][0].contents[0].parts.map((p) => p.text);
+      const second = ai.models.generateContent.mock.calls[1][0].contents[0].parts.map((p) => p.text);
+      expect(first.at(-2)).toBe('# 召喚のきっかけ\nヴァール');
+      expect(second.some((x) => x?.includes('召喚のきっかけ'))).toBe(false);
+    });
+
+    it('締めの文を指定する（評価で以前の文と比べるとき）', async () => {
+      const ai = fakeAi(async () => ({ text: 'スルー' }));
+      await new Responder(cfg, ai).ask({ instruction: '', transcript: '', frames: [], closing: '以前の文' });
+      expect(ai.models.generateContent.mock.calls[0][0].contents[0].parts.at(-1).text).toBe('以前の文');
+    });
   });
 
   describe('答える役が検索を使える', () => {

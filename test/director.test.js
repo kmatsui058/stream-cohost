@@ -7,6 +7,7 @@ import { Director, splitSentences, isSilentReply, DISMISS_MARKER } from '../src/
 import { Memory } from '../src/memory.js';
 import { logFilePath } from '../src/log.js';
 import { Lorebook } from '../src/lorebook.js';
+import { Policies } from '../src/policies.js';
 
 function fakeSpeaker() {
   const s = new EventEmitter();
@@ -39,7 +40,7 @@ const readLog = async () => {
   return fs.readFileSync(logFilePath(), 'utf8');
 };
 
-function setup({ cfg = {}, frames = [], lorebook } = {}) {
+function setup({ cfg = {}, frames = [], lorebook, policies } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-dir-'));
   const memory = new Memory({
     ai: { models: { generateContent: vi.fn(async () => ({ text: '要約' })) } },
@@ -55,6 +56,7 @@ function setup({ cfg = {}, frames = [], lorebook } = {}) {
     summonWords: ['オルダ', 'ヴァール'],
     getFrames: () => frames,
     lorebook,
+    policies,
   });
   director.on('presence', (v) => presence.push(v));
   const thinking = [];
@@ -466,5 +468,67 @@ describe('lorebook / 進行役とのつなぎ', () => {
     director.onUtterance('オルダ、ゴツミノって強い?');
     await responder.reply(`強いです。${DISMISS_MARKER}`);
     expect(lorebook.active.size).toBe(0);
+  });
+});
+
+describe('answering / 召喚のきっかけを伝える', () => {
+  it('発言で召喚される: 最初の問い合わせに、その発言と反応した言葉を書き添える。2 回目以降は付けない', async () => {
+    const { director, responder } = setup();
+    director.onUtterance('いや、一旦これで戻って、ヴァール城かな、次。');
+    const note = responder.calls[0].req.summonNote;
+    expect(note).toContain('いや、一旦これで戻って、ヴァール城かな、次。');
+    expect(note).toContain('「ヴァール」');
+    expect(note).toMatch(/本当に.*呼ばれたのか/);
+    await responder.reply('あれ、呼ばれた気がしましたが、ハイラル城のお話でしたか。【退去】');
+    director.onUtterance('オルダ、聞こえる?');
+    await responder.reply('はい。');
+    director.onUtterance('この敵は?');
+    expect(responder.calls[0].req.summonNote).toBeUndefined();
+  });
+
+  it('チャットで召喚される: そのチャットと反応した言葉を書き添える', () => {
+    const { director, responder } = setup();
+    director.addChat([{ author: '@A', text: 'こんばんは' }, { author: '@B', text: 'オルダちゃんいる?' }]);
+    const note = responder.calls[0].req.summonNote;
+    expect(note).toContain('@B: オルダちゃんいる?');
+    expect(note).toContain('「オルダ」');
+  });
+
+  it('手で召喚する: 手で召喚されたことを書き添える', () => {
+    const { director, responder } = setup();
+    director.toggleSummon();
+    director.onUtterance('聞こえる?');
+    expect(responder.calls[0].req.summonNote).toMatch(/手で召喚/);
+  });
+
+  it('問い合わせに失敗してやり直すときも、召喚のきっかけを付ける', async () => {
+    const { director, responder } = setup();
+    director.onUtterance('オルダ');
+    responder.calls.shift().reject(new Error('タイムアウト'));
+    await flush();
+    expect(responder.calls[0].req.summonNote).toContain('「オルダ」');
+  });
+});
+
+describe('policies / 進行役とのつなぎ', () => {
+  const pol = () => new Policies({ file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cohost-dpol-')), 'policies.json') });
+
+  it('方針がある: 毎回の指示に「マスターの方針」として入る（キーワードに関係なく）', async () => {
+    const policies = pol();
+    policies.add('攻略の手順やヒントは、はっきり聞かれたときだけ答える');
+    const { director, responder } = setup({ policies });
+    director.onUtterance('オルダ');
+    await responder.reply('はい。');
+    director.onUtterance('よし。');
+    expect(responder.calls[0].req.instruction).toMatch(/# マスターの方針（いつも守ること）\n- 攻略の手順やヒントは、はっきり聞かれたときだけ答える/);
+  });
+
+  it('返事の方針の合図: 方針を足し、合図は読み上げない', async () => {
+    const policies = pol();
+    const { director, responder, speaker } = setup({ policies });
+    director.onUtterance('オルダ、攻略はいらないからね');
+    await responder.reply('承知しました。【方針: 攻略は聞かれたときだけ答える】');
+    expect(speaker.pushed).toEqual(['承知しました。']);
+    expect(policies.policies.map((p) => p.text)).toEqual(['攻略は聞かれたときだけ答える']);
   });
 });

@@ -12,6 +12,7 @@ import { Listener } from './listener.js';
 import { Responder } from './responder.js';
 import { Memory } from './memory.js';
 import { Lorebook } from './lorebook.js';
+import { Policies } from './policies.js';
 import { Overlay } from './overlay.js';
 import { Speaker } from './speaker.js';
 import { Director } from './director.js';
@@ -21,7 +22,7 @@ import { checkVoicevox, synthesize } from './voicevox.js';
 const log = logger('main');
 
 export const HELP =
-  '操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  o=召喚/退去  k <キーワード,…> = <内容>=控えを足す  kl=控えの一覧  kd <番号>=控えを消す  v <動画ID>=チャット対象を変更  r=今すぐ要約  m=今の記憶を表示  q=終了';
+  '操作: p=一時停止/再開  s=今の発話をスキップ  t <文>=テキストで話しかける  o=召喚/退去  k <キーワード,…> = <内容>=控えを足す  kl=控えの一覧  kd <番号>=控えを消す  pl <方針>=方針を足す  pll=方針の一覧  pld <番号>=方針を消す  v <動画ID>=チャット対象を変更  r=今すぐ要約  m=今の記憶を表示  q=終了';
 
 export function createApp(config, deps = {}) {
   const fetchFn = deps.fetch ?? fetch;
@@ -38,6 +39,7 @@ export function createApp(config, deps = {}) {
   });
   const lorebook = new Lorebook({ ...config.lorebook, ...(deps.lorebookFile && { file: deps.lorebookFile }) });
   memory.lorebook = lorebook;
+  const policies = new Policies({ ...config.policies, ...(deps.policiesFile && { file: deps.policiesFile }) });
   const speaker = new Speaker(overlay, config.voicevox, {
     synthesize: deps.synthesize ?? ((text, cfg) => synthesize(text, cfg, fetchFn)),
   });
@@ -48,6 +50,7 @@ export function createApp(config, deps = {}) {
     summonWords: config.summonWords,
     getFrames: () => [...frames],
     lorebook,
+    policies,
   });
   const mic = new Mic(config.mic, deps.spawn ? { spawn: deps.spawn } : {});
   const obs = new ObsCapture(config.obs, deps.obsClient ? { client: deps.obsClient } : {});
@@ -76,6 +79,7 @@ export function createApp(config, deps = {}) {
     await checkVoicevox(config.voicevox.url, fetchFn);
     const port = await overlay.start();
     lorebook.load();
+    policies.load();
     if (carryOver) memory.loadPrevious();
     else log.info('前回の記憶は引き継がずに起動します');
     await listener.connect();
@@ -129,6 +133,9 @@ export function createApp(config, deps = {}) {
       case 'o': director.toggleSummon(); break;
       case 'k': addLore(arg); break;
       case 'kl': log.info(`控え\n${lorebook.list() || '（なし）'}`); break;
+      case 'pl': if (!policies.add(arg)) log.warn('書き方: pl 方針（同じ方針がすでにあるときも足しません）'); break;
+      case 'pll': log.info(`方針\n${policies.list() || '（なし）'}`); break;
+      case 'pld': if (!policies.removeAt(Number(arg))) log.warn(`方針の番号が見つかりません: ${arg}`); break;
       case 'kd': if (!lorebook.removeAt(Number(arg))) log.warn(`控えの番号が見つかりません: ${arg}`); break;
       case 'v': chat.start(arg); break;
       case 'r': memory.summarize().catch((e) => log.warn(`要約に失敗しました: ${e.message}`)); break;
@@ -138,5 +145,5 @@ export function createApp(config, deps = {}) {
     }
   }
 
-  return { overlay, listener, responder, memory, lorebook, speaker, director, mic, obs, chat, frames, start, shutdown, handleCommand };
+  return { overlay, listener, responder, memory, lorebook, policies, speaker, director, mic, obs, chat, frames, start, shutdown, handleCommand };
 }

@@ -5,7 +5,8 @@ import { logger } from './log.js';
 
 const log = logger('responder');
 export const NO_FRAMES_NOTE = '（配信画面はまだ届いていません。画面について聞かれたら、見えていないと答えてください）';
-const CLOSING = '上の記録の最後までを踏まえて、相方として返事をしてください。';
+// 返事を促さない（促すと、独り言や「よし」にも何か言おうとする）。返事をするか黙るかを決めさせるだけ
+export const CLOSING = '記録の最後の発言に対して、返事をするか、黙る（スルー）かを決めてください。';
 
 export class Responder {
   constructor(cfg, ai = new GoogleGenAI({ apiKey: cfg.apiKey })) {
@@ -14,7 +15,8 @@ export class Responder {
   }
 
   // 返事の文章を返す。エラーや時間切れは例外になる
-  async ask({ instruction, transcript, frames }) {
+  // closing は評価で以前の締めの文と比べるときだけ指定する
+  async ask({ instruction, transcript, frames, summonNote, closing = CLOSING }) {
     const parts = [{ text: `# 要約以降の記録\n${transcript}` }];
     if (frames.length) {
       parts.push({ text: '# 直近の配信画面（古い順）' });
@@ -22,7 +24,8 @@ export class Responder {
     } else {
       parts.push({ text: NO_FRAMES_NOTE });
     }
-    parts.push({ text: CLOSING });
+    if (summonNote) parts.push({ text: summonNote }); // 召喚した直後だけ、召喚のきっかけを書き添える
+    parts.push({ text: closing });
     log.info(`問い合わせ中（画面 ${frames.length} 枚・指示 ${instruction.length} 字・記録 ${transcript.length} 字）`);
     const t0 = Date.now();
     let timer;

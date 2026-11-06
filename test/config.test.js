@@ -17,6 +17,7 @@ describe('operator-controls / 設定の既定値を使う', () => {
     expect(c.summonWords).toEqual(['オルダ', 'ヴァール']);
     expect(c.memory).toEqual({ model: 'gemini-3.8-flash', maxChars: 4000, longMaxChars: 20000, recentEntries: 12, summarizeAtChars: 12000, timeoutMs: 120000 });
     expect(c.lorebook).toEqual({ scanEntries: 6, stickyAsks: 3, maxChars: 3000 });
+    expect(c.policies).toEqual({ maxChars: 1000 });
     expect(c.mic.ffmpeg).toBe('ffmpeg');
     expect(c.obs).toEqual({ url: 'ws://127.0.0.1:4455', password: undefined, frameIntervalMs: 2000, frameWidth: 960, sourceName: '' });
     expect(c.voicevox).toEqual({ url: 'http://127.0.0.1:50021', speaker: 47, speedScale: 1.15 });
