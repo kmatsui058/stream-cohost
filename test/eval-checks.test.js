@@ -83,4 +83,14 @@ describe('prompt-eval / 評価ケース', () => {
     }
     expect(new Set(cases.map((c) => c.id)).size).toBe(cases.length);
   });
+  it('「スルー【退去】」は黙ったと数え、退去したことを別に記録する', () => {
+    const r = checkReply('スルー【退去】', 'silent');
+    expect(r.silent).toBe(true);
+    expect(r.dismiss).toBe(true);
+    expect(r.expectOk).toBe(true);
+    const spoke = checkReply('あれ、呼ばれた気がしましたが、ハイラル城のお話でしたか。【退去】', 'speak');
+    expect(spoke.silent).toBe(false);
+    expect(spoke.dismiss).toBe(true);
+    expect(spoke.expectOk).toBe(true);
+  });
 });

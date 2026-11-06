@@ -26,4 +26,9 @@ describe('prompt-eval / 本番と同じ材料で評価する', () => {
     expect(req.closing).toBe(OLD_CLOSING);
     expect(req.transcript.split('\n').at(-1)).toBe('チャット: @A: オルダいる?');
   });
+  it('召喚・退去の印: 印を使う条件のときだけ記録に残す', () => {
+    const withMarker = { context: ['記録: （相方が召喚された）', '配信者: オルダ、見ててね'], text: 'よし。' };
+    expect(buildResponderRequest({ instruction: '', markers: true }, withMarker).transcript).toBe('記録: （相方が召喚された）\n配信者: オルダ、見ててね\n配信者: よし。');
+    expect(buildResponderRequest({ instruction: '' }, withMarker).transcript).toBe('配信者: オルダ、見ててね\n配信者: よし。');
+  });
 });

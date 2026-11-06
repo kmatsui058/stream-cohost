@@ -4,7 +4,7 @@ import { formatSummonNote } from '../src/director.js';
 // 2026-11-05 までの締めの文（返事を促していた）。新旧を比べるときだけ使う
 export const OLD_CLOSING = '上の記録の最後までを踏まえて、相方として返事をしてください。';
 
-// v: 条件（instruction = persona + 今日の配信、policies / summonNote を使うか、closing: 'old' で以前の締めの文）
+// v: 条件（instruction = persona + 今日の配信、policies / summonNote / markers（召喚・退去の印）を使うか、closing: 'old' で以前の締めの文）
 // c: ケース（context = 直前の記録の行、text = 最後の発言、type = 'chat' ならチャット、policies = 方針の一覧、summon = 召喚のきっかけ）
 export function buildResponderRequest(v, c) {
   const policies = v.policies && c.policies?.length
@@ -13,7 +13,8 @@ export function buildResponderRequest(v, c) {
   const last = c.type === 'chat' ? `チャット: ${c.text}` : `配信者: ${c.text}`;
   return {
     instruction: v.instruction + policies,
-    transcript: [...(c.context ?? []), last].join('\n'),
+    // 召喚・退去の印（「記録: 」の行）は、印を使う条件のときだけ残す
+    transcript: [...(c.context ?? []).filter((l) => v.markers || !l.startsWith('記録: ')), last].join('\n'),
     frames: [],
     ...(v.summonNote && c.summon && { summonNote: formatSummonNote(c.summon) }),
     ...(v.closing === 'old' && { closing: OLD_CLOSING }),
