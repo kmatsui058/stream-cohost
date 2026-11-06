@@ -24,7 +24,8 @@ export class Listener extends EventEmitter {
   sessionConfig() {
     return {
       responseModalities: [Modality.TEXT],
-      inputAudioTranscription: { languageCodes: ['ja-JP'], customVocabulary: this.cfg.vocabulary },
+      // 登録語は、設定した用語があるときだけ送る
+      inputAudioTranscription: { languageCodes: ['ja-JP'], ...(this.cfg.vocabulary?.length && { customVocabulary: this.cfg.vocabulary }) },
       realtimeInputConfig: {
         automaticActivityDetection: { silenceDurationMs: this.cfg.silenceDurationMs },
       },

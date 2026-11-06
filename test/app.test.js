@@ -161,11 +161,11 @@ describe('組み立てと操作', () => {
   });
 
   describe('live-session / 聞く役の配線', () => {
-    it('文字起こし専用のモデルに、召喚の言葉を登録語として接続する', async () => {
+    it('文字起こし専用のモデルに、召喚の言葉を登録語に入れずに接続する', async () => {
       await build();
       const p = live.sessions[0].params;
       expect(p.model).toBe('gemini-3.5-transcribe-live');
-      expect(p.config.inputAudioTranscription.customVocabulary).toContain('オルダ');
+      expect(p.config.inputAudioTranscription.customVocabulary).toBeUndefined(); // 召喚の言葉は登録語に入れない（聞き間違いが寄せられるため）
     });
 
     it('区切られた発話は進行役に渡り、名前があれば召喚して問い合わせ、返事を読み上げ、画面に相方を出す', async () => {

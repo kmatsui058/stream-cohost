@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Listener } from '../src/listener.js';
 import { fakeLiveAi } from './fakes/live.js';
 
-const cfg = { model: 'gemini-3.5-transcribe-live', silenceDurationMs: 800, vocabulary: ['オルダ', 'ヴァール'] };
+const cfg = { model: 'gemini-3.5-transcribe-live', silenceDurationMs: 800, vocabulary: [] };
 const flush = () => new Promise((r) => setImmediate(r));
 
 describe('live-session（聞く役）', () => {
@@ -20,9 +20,18 @@ describe('live-session（聞く役）', () => {
       const p = live.last().params;
       expect(p.model).toBe('gemini-3.5-transcribe-live');
       expect(p.config.responseModalities).toEqual(['TEXT']);
-      expect(p.config.inputAudioTranscription).toEqual({ languageCodes: ['ja-JP'], customVocabulary: ['オルダ', 'ヴァール'] });
+      expect(p.config.inputAudioTranscription).toEqual({ languageCodes: ['ja-JP'] });
       expect(p.config.realtimeInputConfig.automaticActivityDetection.silenceDurationMs).toBe(800);
       expect(listener.ready).toBe(true);
+    });
+  });
+
+  describe('セッションの設定（用語）', () => {
+    it('用語を設定する: 設定した用語だけを登録語として送る', async () => {
+      const live = fakeLiveAi();
+      listener = new Listener({ ...cfg, vocabulary: ['ニブルヘイム', 'ソーサラー'] }, live.ai);
+      await listener.connect();
+      expect(live.last().params.config.inputAudioTranscription).toEqual({ languageCodes: ['ja-JP'], customVocabulary: ['ニブルヘイム', 'ソーサラー'] });
     });
   });
 
