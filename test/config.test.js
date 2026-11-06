@@ -10,7 +10,7 @@ describe('operator-controls / 設定の既定値を使う', () => {
     expect(c.listener).toEqual({
       model: 'gemini-3.5-transcribe-live',
       silenceDurationMs: 800,
-      vocabulary: ['オルダ', 'ヴァール'],
+      vocabulary: [],
     });
     expect(c.responder).toEqual({ model: 'gemini-4-argon', frames: 3, timeoutMs: 30000, search: true });
     expect(loadConfig({ RESPONDER_SEARCH: '0' }, readPersona).responder.search).toBe(false);
@@ -55,10 +55,10 @@ describe('operator-controls / 設定の既定値を使う', () => {
     expect(loadConfig({ CHARACTER_DIR: 'C:\\chars' }, readPersona).overlay.characterDir).toBe('C:\\chars');
   });
 
-  it('召喚の言葉を指定する: カンマ区切りで使われ、聞き取りやすくする語にも入る', () => {
+  it('召喚の言葉を指定する: カンマ区切りで使われる。聞き取りやすくする語には入れず、用語だけを入れる', () => {
     const c = loadConfig({ SUMMON_WORDS: 'オルダ, ヴァール ,オルダちゃん', CUSTOM_VOCABULARY: 'ニブルヘイム,ソーサラー' }, readPersona);
     expect(c.summonWords).toEqual(['オルダ', 'ヴァール', 'オルダちゃん']);
-    expect(c.listener.vocabulary).toEqual(['オルダ', 'ヴァール', 'オルダちゃん', 'ニブルヘイム', 'ソーサラー']);
+    expect(c.listener.vocabulary).toEqual(['ニブルヘイム', 'ソーサラー']);
   });
 });
 

@@ -19,8 +19,8 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       model: env.LISTENER_MODEL || 'gemini-3.5-transcribe-live',
       // 無音がこの長さ（ms）続いたら 1 発話として区切る
       silenceDurationMs: num('VAD_SILENCE_MS', 800),
-      // 聞き取りやすくする語（召喚の言葉 + 用語）
-      vocabulary: [...summonWords, ...list('CUSTOM_VOCABULARY', [])],
+      // 聞き取りやすくする語（CUSTOM_VOCABULARY の用語だけ）。召喚の言葉は入れない（似た音が寄せられて聞き間違いの召喚が増えた）
+      vocabulary: list('CUSTOM_VOCABULARY', []),
     },
     // 答える役: 召喚中の発話に、考えてから答えるモデル
     responder: {
