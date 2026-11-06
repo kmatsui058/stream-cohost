@@ -72,12 +72,14 @@ export class Director extends EventEmitter {
 
   onUtterance(text) {
     log.info(`🎤 ${text}`);
+    // 召喚するなら、印を発言の前に入れる（記録の最後は、召喚のきっかけになった発言になる）
+    const word = this.calledWord(text);
+    if (word && !this.summoned && !this.paused) this.summon({ from: '配信者の発言', text, word });
     this.memory.add('配信者', text);
     // 相方が喋っている最中に配信者が話したら、設定に従って止める（duck なら話し終えたので音量を戻す）
     if (this.cfg.bargeIn === 'stop' && this.speaker.speaking && text.trim().length >= 2) this.speaker.stop();
     if (this.cfg.bargeIn === 'duck') this.releaseDuck();
-    const word = this.calledWord(text);
-    this.consider(word && { from: '配信者の発言', text, word });
+    this.askIfSummoned();
   }
 
   // 配信者が話している途中（途中経過の文字起こし）。duck なら相方の声を小さくし、途切れたら戻す
@@ -96,22 +98,23 @@ export class Director extends EventEmitter {
   }
 
   addChat(msgs) {
-    for (const m of msgs) this.memory.add('チャット', `${m.author}: ${m.text}`);
     const hit = msgs.find((m) => this.calledWord(m.text));
-    this.consider(hit && { from: 'チャット', text: `${hit.author}: ${hit.text}`, word: this.calledWord(hit.text) });
+    if (hit && !this.summoned && !this.paused) this.summon({ from: 'チャット', text: `${hit.author}: ${hit.text}`, word: this.calledWord(hit.text) });
+    for (const m of msgs) this.memory.add('チャット', `${m.author}: ${m.text}`);
+    this.askIfSummoned();
   }
 
-  // 名前が呼ばれていれば召喚し、召喚中なら問い合わせる（reason は召喚のきっかけ）
-  consider(reason) {
-    if (this.paused) return;
-    if (!this.summoned && reason) this.summon(reason);
-    if (this.summoned) this.request();
+  // 召喚中なら問い合わせる
+  askIfSummoned() {
+    if (!this.paused && this.summoned) this.request();
   }
 
   summon(reason = { manual: true }) {
     this.summoned = true;
     this.justSummoned = true;
     this.summonReason = reason;
+    // 記録に印を入れる（いなかった間を相方が区別できるように）
+    this.memory.add('記録', '（相方が召喚された）');
     log.info('召喚されました');
     if (!this.shown) {
       this.shown = true;
@@ -123,6 +126,7 @@ export class Director extends EventEmitter {
     this.summoned = false;
     this.pending = false;
     this.lorebook?.reset();
+    this.memory.add('記録', '（相方が退去した）');
     log.info('退去しました');
     this.hideIfDismissed();
   }

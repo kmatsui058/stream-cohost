@@ -99,7 +99,7 @@ describe('conversation-memory', () => {
       const prompt = ai.models.generateContent.mock.calls[0][0].contents;
       expect(ai.models.generateContent.mock.calls[0][0].model).toBe('flash');
       expect(prompt).toContain('4000 文字以内');
-      expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方/);
+      expect(prompt).toMatch(/残すもの[\s\S]*今やっていること[\s\S]*物語やセリフの要点[\s\S]*事実・好み・予定・感想[\s\S]*訂正[\s\S]*相方[\s\S]*相方がマスターに聞いて分かったこと/);
       expect(prompt).toMatch(/捨てるもの[\s\S]*相づち[\s\S]*挨拶の繰り返し[\s\S]*言い淀み[\s\S]*動作確認/);
       expect(prompt).toContain('（なし）');
     });

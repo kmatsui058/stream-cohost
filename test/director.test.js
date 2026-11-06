@@ -99,7 +99,7 @@ describe('turn-taking / answering（召喚・会話・退去）', () => {
       director.addChat([{ author: 'Aさん', text: 'オルダちゃんこんばんは' }]);
       expect(director.summoned).toBe(true);
       expect(responder.ask).toHaveBeenCalledTimes(1);
-      expect(memory.transcript()).toBe('チャット: Aさん: オルダちゃんこんばんは');
+      expect(memory.transcript()).toBe('記録: （相方が召喚された）\nチャット: Aさん: オルダちゃんこんばんは');
     });
 
     it('待機中の名前のないチャット: 問い合わせず、記録はする', () => {
@@ -530,5 +530,29 @@ describe('policies / 進行役とのつなぎ', () => {
     await responder.reply('承知しました。【方針: 攻略は聞かれたときだけ答える】');
     expect(speaker.pushed).toEqual(['承知しました。']);
     expect(policies.policies.map((p) => p.text)).toEqual(['攻略は聞かれたときだけ答える']);
+  });
+});
+
+describe('召喚と退去の印を記録に入れる', () => {
+  it('発言で召喚される: 召喚の印はその発言の前に入り、記録の最後はその発言になる', () => {
+    const { director, responder } = setup();
+    director.onUtterance('独り言');
+    director.onUtterance('オルダ、聞こえる?');
+    expect(responder.calls[0].req.transcript).toBe('配信者: 独り言\n記録: （相方が召喚された）\n配信者: オルダ、聞こえる?');
+  });
+
+  it('退去する: 退去の印が入り、その後の発言はいなかった間の記録になる', async () => {
+    const { director, responder, memory } = setup();
+    director.onUtterance('オルダ');
+    await responder.reply(`では。${DISMISS_MARKER}`);
+    director.onUtterance('ここは炎の神殿か');
+    expect(memory.transcript().split('\n').slice(-3)).toEqual(['相方: では。', '記録: （相方が退去した）', '配信者: ここは炎の神殿か']);
+  });
+
+  it('一時停止中: 召喚されないので印も入らない', () => {
+    const { director, memory } = setup();
+    director.setPaused(true);
+    director.onUtterance('オルダ');
+    expect(memory.transcript()).toBe('配信者: オルダ');
   });
 });
