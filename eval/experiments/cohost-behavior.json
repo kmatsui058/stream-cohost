@@ -1,0 +1,7 @@
+{
+  "description": "2026-11-05 の場面で、あるべき姿（cohost-behavior）の persona と仕組みを、11/5 の本番と比べる。モデルは本番と同じ 3.8-flash、検索なし、画面なし",
+  "variants": [
+    { "name": "旧（11/5 の本番）", "persona": "git:main", "model": "gemini-3.8-flash", "api": "responder", "closing": "old" },
+    { "name": "新（あるべき姿）", "persona": "file:persona.md", "model": "gemini-3.8-flash", "api": "responder", "policies": true, "summonNote": true, "markers": true }
+  ]
+}

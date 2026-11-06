@@ -8,6 +8,7 @@
 //
 // 設定ファイルの variants: [{ name, persona: "file:<パス>" | "git:<版>", model?, thinkingLevel?, tools?, api? }]
 // api: "text" にすると、Live ではなく通常の生成 API で返事を受け取る（gemini-3.8-flash など）。
+// api: "responder" にすると、本番の答える役と同じ形で問い合わせる（policies: true で方針、summonNote: true で召喚のきっかけ、closing: "old" で以前の締めの文）。
 // 実際の Gemini を呼ぶので課金が発生し、結果も毎回変わる。CI では実行しない。
 // 制約: ログに画面の画像が無いので、入力はテキストだけ（画面への反応は評価できない）。
 import fs from 'node:fs';
@@ -18,6 +19,8 @@ import { configureLogging } from '../src/log.js';
 import { loadConfig } from '../src/config.js';
 import { checkReply, summarize, CHECKS } from './checks.js';
 import { askText } from './ask-text.js';
+import { buildResponderRequest } from './build-request.js';
+import { Responder } from '../src/responder.js';
 
 const DEFAULT_BASELINE = '8ff7a55'; // 2026-10-18 の初配信で使っていた persona
 const TIMEOUT_MS = 60000; // 考える量を増やすと遅くなるので長めに
@@ -60,7 +63,14 @@ const variants = experiment.variants.map((v) => ({
 }));
 
 // 1 回の入力に対する相方の返事（出力の文字起こし）と、返事が終わるまでの時間を受け取る
-async function ask(v, text, context) {
+async function ask(v, text, context, c) {
+  // 本番の答える役と同じ問い合わせ（方針・召喚のきっかけ・締めの文）で評価する
+  if (v.api === 'responder') {
+    const t0 = Date.now();
+    const out = await new Responder({ model: v.model, timeoutMs: TIMEOUT_MS, search: v.search ?? false }, ai).ask(buildResponderRequest(v, c));
+    const ms = Date.now() - t0;
+    return { text: out, ms, firstMs: ms, signals: [] };
+  }
   // ケースに直前のやり取りがあれば、本番と同じ形（「話者: 発言」）で指示に入れる
   const systemInstruction = v.instruction + (context?.length ? `\n\n# 直前のやり取り\n${context.join('\n')}` : '');
   if (v.api === 'text') {
@@ -134,7 +144,7 @@ await Promise.all(
     while (next < jobs.length) {
       const { c, ci, v, vi } = jobs[next++];
       try {
-        replies[ci][vi] = await ask(v, inputOf(c), c.context);
+        replies[ci][vi] = await ask(v, inputOf(c), c.context, c);
       } catch (e) {
         replies[ci][vi] = { text: '', ms: null, firstMs: null, signals: [], error: e.message };
         console.error(`\n失敗: ${c.id} / ${v.name}: ${e.message}`);

@@ -32,16 +32,26 @@ export function splitSentences(text) {
 // ひらがなをカタカナにそろえる（文字起こしが「おるだ」になっても召喚できるように）
 const toKatakana = (s) => s.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
 
+// 召喚のきっかけを、答える役に判断させる文にする（評価でも同じ文を使う）
+export function formatSummonNote(r) {
+  const how = r.manual
+    ? '配信者がコンソールから手で召喚しました。'
+    : `${r.from}「${r.text}」の「${r.word}」に反応して召喚されました。`;
+  return `# 召喚のきっかけ\n${how}本当にあなたが呼ばれたのか、ゲームの用語や似た言葉への反応・聞き間違いなのかを、文脈から判断してください。`;
+}
+
 export class Director extends EventEmitter {
-  constructor({ responder, speaker, memory, cfg, summonWords, getFrames = () => [], lorebook = null }) {
+  constructor({ responder, speaker, memory, cfg, summonWords, getFrames = () => [], lorebook = null, policies = null }) {
     super();
     this.responder = responder;
     this.speaker = speaker;
     this.memory = memory;
     this.cfg = cfg;
-    this.summonWords = summonWords.map(toKatakana);
+    this.summonWords = summonWords;
     this.getFrames = getFrames;
     this.lorebook = lorebook; // 控え（キーワードが出たときだけ指示に入れる）
+    this.policies = policies; // 方針（毎回指示に入れる）
+    this.summonReason = null; // 召喚のきっかけ（{ from, text, word } か { manual: true }）
     this.summoned = false;
     this.shown = false; // 画面に相方を出しているか（退去後も読み上げが終わるまで出しておく）
     this.busy = false; // 問い合わせ中
@@ -54,18 +64,22 @@ export class Director extends EventEmitter {
     speaker.on('idle', () => this.hideIfDismissed());
   }
 
-  callsName(text) {
+  // 反応した召喚の言葉（なければ undefined）
+  calledWord(text) {
     const t = toKatakana(text);
-    return this.summonWords.some((w) => t.includes(w));
+    return this.summonWords.find((w) => t.includes(toKatakana(w)));
   }
 
   onUtterance(text) {
     log.info(`🎤 ${text}`);
+    // 召喚するなら、印を発言の前に入れる（記録の最後は、召喚のきっかけになった発言になる）
+    const word = this.calledWord(text);
+    if (word && !this.summoned && !this.paused) this.summon({ from: '配信者の発言', text, word });
     this.memory.add('配信者', text);
     // 相方が喋っている最中に配信者が話したら、設定に従って止める（duck なら話し終えたので音量を戻す）
     if (this.cfg.bargeIn === 'stop' && this.speaker.speaking && text.trim().length >= 2) this.speaker.stop();
     if (this.cfg.bargeIn === 'duck') this.releaseDuck();
-    this.consider(this.callsName(text));
+    this.askIfSummoned();
   }
 
   // 配信者が話している途中（途中経過の文字起こし）。duck なら相方の声を小さくし、途切れたら戻す
@@ -84,20 +98,23 @@ export class Director extends EventEmitter {
   }
 
   addChat(msgs) {
+    const hit = msgs.find((m) => this.calledWord(m.text));
+    if (hit && !this.summoned && !this.paused) this.summon({ from: 'チャット', text: `${hit.author}: ${hit.text}`, word: this.calledWord(hit.text) });
     for (const m of msgs) this.memory.add('チャット', `${m.author}: ${m.text}`);
-    this.consider(msgs.some((m) => this.callsName(m.text)));
+    this.askIfSummoned();
   }
 
-  // 名前が呼ばれていれば召喚し、召喚中なら問い合わせる
-  consider(named) {
-    if (this.paused) return;
-    if (!this.summoned && named) this.summon();
-    if (this.summoned) this.request();
+  // 召喚中なら問い合わせる
+  askIfSummoned() {
+    if (!this.paused && this.summoned) this.request();
   }
 
-  summon() {
+  summon(reason = { manual: true }) {
     this.summoned = true;
     this.justSummoned = true;
+    this.summonReason = reason;
+    // 記録に印を入れる（いなかった間を相方が区別できるように）
+    this.memory.add('記録', '（相方が召喚された）');
     log.info('召喚されました');
     if (!this.shown) {
       this.shown = true;
@@ -109,6 +126,7 @@ export class Director extends EventEmitter {
     this.summoned = false;
     this.pending = false;
     this.lorebook?.reset();
+    this.memory.add('記録', '（相方が退去した）');
     log.info('退去しました');
     this.hideIfDismissed();
   }
@@ -157,6 +175,7 @@ export class Director extends EventEmitter {
       instruction: this.instruction(),
       transcript: this.memory.transcript(),
       frames: this.getFrames(),
+      ...(this.justSummoned && { summonNote: this.summonNote() }),
     };
     let reply;
     try {
@@ -173,6 +192,8 @@ export class Director extends EventEmitter {
     }
     this.justSummoned = false; // 召喚後の最初の返事が届いた
     if (this.paused) return;
+    // 方針の合図を保存して取り除く
+    if (this.policies) reply = this.policies.apply(reply);
     // 控えの合図（記憶・忘却）を実行して取り除く
     if (this.lorebook) reply = this.lorebook.apply(reply);
     const dismiss = reply.includes(DISMISS_MARKER);
@@ -188,9 +209,15 @@ export class Director extends EventEmitter {
     this.memory.maybeSummarize();
   }
 
-  // 答える役への指示: 記憶の指示に、直近の記録でキーワードが出た控えを足す
+  // 召喚した直後の問い合わせに書き添える、召喚のきっかけ
+  summonNote() {
+    return formatSummonNote(this.summonReason ?? { manual: true });
+  }
+
+  // 答える役への指示: 記憶の指示に、方針（毎回）と、直近の記録でキーワードが出た控えを足す
   instruction() {
-    const base = this.memory.instruction();
+    const policy = this.policies?.section();
+    const base = policy ? `${this.memory.instruction()}\n\n${policy}` : this.memory.instruction();
     if (!this.lorebook) return base;
     // 発言の本文だけを探す（「配信者: 」などの話者の区別では当てない。チャットは本文に投稿者名を含む）
     const recent = this.memory.entries.slice(-this.lorebook.scanEntries).map((e) => e.text).join('\n');

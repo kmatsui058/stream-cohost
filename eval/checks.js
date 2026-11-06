@@ -1,10 +1,14 @@
 // 評価用: 相方の返事をルールでチェックする。
 // ここにある言い回しの一覧は、プロンプトに入れるものではなく、評価で検出するためのもの。
-import { isSilentReply } from '../src/director.js';
+import { isSilentReply, DISMISS_MARKER } from '../src/director.js';
+
+// 読み上げられる部分（退去の合図を除く）。「スルー【退去】」は何も読み上げずに帰る
+const spoken = (t) => (t ?? '').replaceAll(DISMISS_MARKER, '');
 
 export const CHECKS = [
   { key: 'empty', label: '返事なし', test: (t) => !t.trim() },
-  { key: 'silent', label: '黙った（スルー）', test: (t) => isSilentReply(t) },
+  { key: 'silent', label: '黙った（スルー）', test: (t) => isSilentReply(spoken(t)) },
+  { key: 'dismiss', label: '退去した', test: (t) => t.includes(DISMISS_MARKER) },
   { key: 'long', label: '120字超', test: (t) => [...t].length > 120 },
   { key: 'question', label: '疑問で終わる', test: (t) => /[?？]$|か。?$/.test(t.trim()) },
   { key: 'desuNe', label: '「ですね」', test: (t) => /ですね/.test(t) },
@@ -23,7 +27,7 @@ export const CHECKS = [
   { key: 'wrongName', label: '呼び方の誤り', test: (t) => /小波|さざなみ|おこは|オコハ|夕暮/.test(t) },
 ];
 
-export const isSilent = (text) => isSilentReply(text ?? '');
+export const isSilent = (text) => isSilentReply(spoken(text));
 
 // 正解（silent: 黙るべき / speak: 話すべき）と合っているか。正解が無ければ null
 export function matchesExpect(text, expect) {

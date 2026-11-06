@@ -33,6 +33,7 @@ describe('組み立てと操作', () => {
       synthesize: async () => silentWav(1),
       stateFile: path.join(tmp, 'carryover.json'),
       lorebookFile: path.join(tmp, 'lorebook.json'),
+      policiesFile: path.join(tmp, 'policies.json'),
       carryOver,
       onQuit,
     });
@@ -107,6 +108,22 @@ describe('組み立てと操作', () => {
       app.handleCommand('t オルダ、ゴツミノって強い?');
       await vi.waitFor(() => expect(asks()).toHaveLength(1));
       expect(asks()[0].config.systemInstruction).toContain('ごつミノは一般モンスター');
+    });
+
+    it('方針を手で足して消す: pl・pll・pld。足した方針は問い合わせの指示に入る', async () => {
+      await build();
+      app.handleCommand('pl 攻略は聞かれたときだけ');
+      expect(JSON.parse(fs.readFileSync(path.join(tmp, 'policies.json'), 'utf8')).policies.map((p) => p.text)).toEqual(['攻略は聞かれたときだけ']);
+      app.handleCommand('t オルダ');
+      await vi.waitFor(() => expect(asks()).toHaveLength(1));
+      expect(asks()[0].config.systemInstruction).toContain('- 攻略は聞かれたときだけ');
+      app.handleCommand('pll');
+      app.handleCommand('pld 1');
+      app.handleCommand('pld 9');
+      expect(app.policies.policies).toEqual([]);
+      const log = await readLog();
+      expect(log).toContain('1. 攻略は聞かれたときだけ');
+      expect(log).toMatch(/方針の番号が見つかりません: 9/);
     });
 
     it('s: 発話を中断する', async () => {

@@ -50,6 +50,10 @@ export function loadConfig(env = process.env, readFile = (p) => fs.readFileSync(
       stickyAsks: num('LORE_STICKY_ASKS', 3),
       maxChars: num('LORE_MAX_CHARS', 3000),
     },
+    // 方針（いつも守ること）: 毎回の指示に入れる上限の文字数
+    policies: {
+      maxChars: num('POLICY_MAX_CHARS', 1000),
+    },
     mic: {
       // ffmpeg の dshow デバイス名。`npm run mics` で一覧が出る
       device: env.MIC_DEVICE,
